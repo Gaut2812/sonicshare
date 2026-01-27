@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Send | SonicShare</title>
+    <link rel="stylesheet" href="/static/style.css" />
+  </head>
+  <body>
+    <div class="container">
+      <div class="card">
+        <h2>Your Invite Code</h2>
+        <p>Share this code with the receiver</p>
+
+        <button class="btn" onclick="createCurrentSession()">
+          Generate Invite Code
+        </button>
+
+        <div id="invite-code" class="code-display">...</div>
+
+        <div
+          id="drop-zone"
+          class="drop-zone"
+          onclick="document.getElementById('fileInput').click()"
+        >
+          <p>📂 Click or Drag file here</p>
+          <input type="file" id="fileInput" hidden />
+        </div>
+
+        <div class="progress-bar-container" id="progress-container">
+          <div class="progress-bar" id="progress-bar"></div>
+        </div>
+
+        <div id="status" class="status">Connecting to secure relay...</div>
+
+        <a
+          href="index.html"
+          style="
+            margin-top: 20px;
+            display: block;
+            color: var(--text-secondary);
+            text-decoration: none;
+          "
+          >&larr; Back</a
+        >
+      </div>
+    </div>
+
+    <script src="/static/app.js"></script>
+    <script>
+      window.onload = () => {
+        connect(); // Only connect
+      };
+
+      function createCurrentSession() {
+        createSession();
+      }
+
+      const fileInput = document.getElementById("fileInput");
+      const dropZone = document.getElementById("drop-zone");
+      const statusEl = document.getElementById("status");
+
+      selectedFile = null;
+
+      fileInput.addEventListener("change", () => {
+        if (fileInput.files.length) {
+          selectedFile = fileInput.files[0];
+          statusEl.innerText = "Selected: " + selectedFile.name;
+          if (state === "READY") {
+            sendFile(selectedFile);
+          } else {
+            statusEl.innerText =
+              "File selected. Waiting for pairing (READY)...";
+          }
+        }
+      });
+
+      // Drag & Drop
+      dropZone.addEventListener("dragover", (e) => {
+        e.preventDefault();
+        dropZone.classList.add("dragover");
+      });
+      dropZone.addEventListener("dragleave", () =>
+        dropZone.classList.remove("dragover"),
+      );
+      dropZone.addEventListener("drop", (e) => {
+        e.preventDefault();
+        dropZone.classList.remove("dragover");
+        if (e.dataTransfer.files.length) {
+          selectedFile = e.dataTransfer.files[0];
+          fileInput.files = e.dataTransfer.files;
+          statusEl.innerText = "Selected: " + selectedFile.name;
+          if (state === "READY") {
+            sendFile(selectedFile);
+          } else {
+            statusEl.innerText = "File dropped. Waiting for pairing (READY)...";
+          }
+        }
+      });
+
+      // Observe Status for Progress Updates (Hack to reuse app.js logic without rewrite)
+      // Ideally we update app.js to update width directly, but let's do a simple observer or overwrite the UI updater in app.js
+      // Actually, let's inject a UI updater into app.js scope if possible, or just rely on text text parsing?
+      // Let's rely on text text parsing for now or quick-patch app.js style.
+    </script>
+  </body>
+</html>
