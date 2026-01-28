@@ -3,18 +3,74 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>SonicShare | Global File Transfer</title>
+    <title>SonicShare | Secure Peer-to-Peer Transfer</title>
     <link rel="stylesheet" href="/static/style.css" />
   </head>
   <body>
     <div class="container">
-      <h1>SonicShare</h1>
-      <p>Secure, global file transfer without limits.</p>
+      <div style="text-align: center; margin-bottom: 2.5rem">
+        <h1>SonicShare</h1>
+        <p>Private, high-speed, and encrypted file transfer.</p>
+      </div>
 
       <div class="card">
-        <a href="sender.html" class="btn">🚀 Send File</a>
-        <a href="receiver.html" class="btn btn-secondary">📥 Receive File</a>
+        <div style="margin-bottom: 2.5rem">
+          <h2 style="font-size: 1.8rem">How do you want to start?</h2>
+          <p style="margin-bottom: 0">
+            Select an action to begin your secure transfer.
+          </p>
+        </div>
+
+        <a href="sender.html" class="btn">
+          <span style="font-size: 1.3rem; margin-right: 0.75rem">🚀</span>
+          Send a File
+        </a>
+        <a href="receiver.html" class="btn btn-secondary">
+          <span style="font-size: 1.3rem; margin-right: 0.75rem">📥</span>
+          Receive a File
+        </a>
+
+        <div
+          style="
+            margin-top: 2rem;
+            padding-top: 2rem;
+            border-top: 1px solid var(--glass-border);
+          "
+        >
+          <div
+            style="
+              display: flex;
+              justify-content: space-around;
+              font-size: 0.85rem;
+              color: var(--text-secondary);
+            "
+          >
+            <div style="display: flex; align-items: center">
+              <span style="color: var(--success); margin-right: 0.5rem">✔</span>
+              E2E Encrypted
+            </div>
+            <div style="display: flex; align-items: center">
+              <span style="color: var(--success); margin-right: 0.5rem">✔</span>
+              No Limits
+            </div>
+            <div style="display: flex; align-items: center">
+              <span style="color: var(--success); margin-right: 0.5rem">✔</span>
+              P2P Speed
+            </div>
+          </div>
+        </div>
       </div>
+
+      <p
+        style="
+          text-align: center;
+          font-size: 0.8rem;
+          margin-top: 2rem;
+          opacity: 0.5;
+        "
+      >
+        SonicShare v2.0 &bull; Secure Relay Protocol Active
+      </p>
     </div>
   </body>
 </html>

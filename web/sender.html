@@ -9,21 +9,47 @@
   <body>
     <div class="container">
       <div class="card">
-        <h2>Your Invite Code</h2>
-        <p>Share this code with the receiver</p>
+        <h2 style="font-size: 2rem">Share Files</h2>
+        <p>Transfer any file securely with a simple code.</p>
 
-        <button class="btn" onclick="createCurrentSession()">
+        <button class="btn" id="generate-btn" onclick="createCurrentSession()">
           Generate Invite Code
         </button>
 
-        <div id="invite-code" class="code-display">...</div>
+        <div style="position: relative">
+          <div
+            id="invite-code"
+            class="code-display"
+            onclick="copyCode()"
+            style="cursor: pointer"
+            title="Click to copy"
+          >
+            ------
+          </div>
+          <div
+            id="copy-status"
+            style="
+              position: absolute;
+              bottom: 0;
+              left: 50%;
+              transform: translateX(-50%);
+              font-size: 0.7rem;
+              color: var(--success);
+              opacity: 0;
+              transition: opacity 0.3s;
+            "
+          >
+            Copied!
+          </div>
+        </div>
 
         <div
           id="drop-zone"
           class="drop-zone"
           onclick="document.getElementById('fileInput').click()"
         >
-          <p>📂 Click or Drag file here</p>
+          <div style="font-size: 3rem; margin-bottom: 1rem">📂</div>
+          <p>Click or Drag file here to send</p>
           <input type="file" id="fileInput" hidden />
         </div>
 
@@ -31,29 +57,23 @@
           <div class="progress-bar" id="progress-bar"></div>
         </div>
 
-        <div id="status" class="status">Connecting to secure relay...</div>
+        <div id="status" class="status">Initializing secure relay...</div>
 
-        <a
-          href="index.html"
-          style="
-            margin-top: 20px;
-            display: block;
-            color: var(--text-secondary);
-            text-decoration: none;
-          "
-          >&larr; Back</a
-        >
+        <a href="index.html" class="back-link">&larr; Back to Home</a>
       </div>
     </div>
 
     <script src="/static/app.js"></script>
     <script>
       window.onload = () => {
-        connect(); // Only connect
+        connect();
       };
 
       function createCurrentSession() {
         createSession();
+        document.getElementById("generate-btn").disabled = true;
+        document.getElementById("generate-btn").style.opacity = "0.5";
+        document.getElementById("generate-btn").innerText = "Code Generated";
       }
 
       const fileInput = document.getElementById("fileInput");
@@ -64,14 +84,7 @@
 
       fileInput.addEventListener("change", () => {
         if (fileInput.files.length) {
-          selectedFile = fileInput.files[0];
-          statusEl.innerText = "Selected: " + selectedFile.name;
-          if (state === "READY") {
-            sendFile(selectedFile);
-          } else {
-            statusEl.innerText =
-              "File selected. Waiting for pairing (READY)...";
-          }
+          handleFileSelection(fileInput.files[0]);
         }
       });
 
@@ -87,21 +100,32 @@
         e.preventDefault();
         dropZone.classList.remove("dragover");
         if (e.dataTransfer.files.length) {
-          selectedFile = e.dataTransfer.files[0];
-          fileInput.files = e.dataTransfer.files;
-          statusEl.innerText = "Selected: " + selectedFile.name;
-          if (state === "READY") {
-            sendFile(selectedFile);
-          } else {
-            statusEl.innerText = "File dropped. Waiting for pairing (READY)...";
-          }
+          handleFileSelection(e.dataTransfer.files[0]);
         }
       });
 
-      // Observe Status for Progress Updates (Hack to reuse app.js logic without rewrite)
-      // Ideally we update app.js to update width directly, but let's do a simple observer or overwrite the UI updater in app.js
-      // Actually, let's inject a UI updater into app.js scope if possible, or just rely on text text parsing?
-      // Let's rely on text text parsing for now or quick-patch app.js style.
+      function handleFileSelection(file) {
+        selectedFile = file;
+        statusEl.innerText = "Selected: " + selectedFile.name;
+        statusEl.style.color = "var(--accent)";
+
+        if (state === "READY") {
+          sendFile(selectedFile);
+        } else {
+          statusEl.innerText = "File ready. Waiting for pairing (READY)...";
+          statusEl.style.color = "var(--text-secondary)";
+        }
+      }
+
+      function copyCode() {
+        const code = document.getElementById("invite-code").innerText;
+        if (code === "------") return;
+        navigator.clipboard.writeText(code).then(() => {
+          const status = document.getElementById("copy-status");
+          status.style.opacity = "1";
+          setTimeout(() => (status.style.opacity = "0"), 2000);
+        });
+      }
     </script>
   </body>
 </html>

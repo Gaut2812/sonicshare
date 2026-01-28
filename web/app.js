@@ -2,22 +2,29 @@ let ws;
 let isConnected = false;
 let db = null;
 
-// --- Crypto State (Disabled for Step 11) ---
+// --- Crypto State (Step 13: E2EE) ---
 let keyPair = null;
 let sharedKey = null;
 
-async function generateKeyPair() {
+async function generateKeys() {
+  console.log("🔐 Generating ECDH (P-256) keys...");
   keyPair = await crypto.subtle.generateKey(
     { name: "ECDH", namedCurve: "P-256" },
     true,
     ["deriveKey"],
   );
-  console.log("ECDH Key Pair generated");
 }
 
-async function exportPublicKey() {
-  const pub = await crypto.subtle.exportKey("raw", keyPair.publicKey);
-  return bufToB64(pub);
+async function sendPublicKey() {
+  const raw = await crypto.subtle.exportKey("raw", keyPair.publicKey);
+  console.log("📡 Sending Public Key...");
+  ws.send(
+    JSON.stringify({
+      type: "KEY",
+      code: sessionCode,
+      payload: bufToB64(raw),
+    }),
+  );
 }
 
 async function importPeerKey(b64) {
@@ -39,7 +46,45 @@ async function deriveSharedKey(peerPublicKey) {
     false,
     ["encrypt", "decrypt"],
   );
-  console.log("Shared AES-GCM key derived");
+  console.log("🔐 Shared AES-GCM key derived & ready");
+}
+
+// 14.1 — Integrity Helper
+async function computeHash(buffer) {
+  const hashBuffer = await crypto.subtle.digest("SHA-256", buffer);
+  return bufToB64(hashBuffer);
+}
+
+// 13.6 — Encrypt DATA Payload (Sender)
+async function encryptChunk(buffer) {
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const encrypted = await crypto.subtle.encrypt(
+    { name: "AES-GCM", iv },
+    sharedKey,
+    buffer,
+  );
+
+  return {
+    iv: bufToB64(iv),
+    data: bufToB64(encrypted),
+  };
+}
+
+// 13.7 — Decrypt DATA Payload (Receiver)
+async function decryptChunk(b64Data, b64Iv) {
+  try {
+    return await crypto.subtle.decrypt(
+      {
+        name: "AES-GCM",
+        iv: b64ToBuf(b64Iv),
+      },
+      sharedKey,
+      b64ToBuf(b64Data),
+    );
+  } catch (e) {
+    console.error("❌ Decryption failed! Key mismatch?", e);
+    throw e;
+  }
 }
 
 // Byte Helpers
@@ -66,61 +111,188 @@ function base64ToArrayBuffer(base64) {
   return b64ToBuf(base64).buffer;
 }
 
-// --- Persistence (Disabled for Step 11 to follow "receivedChunks" instructions) ---
-function initDB(cb) {
-  if (cb) cb();
+// --- Persistence (Step 12: Resume Transfer) ---
+async function initDB(cb) {
+  console.log("🔧 Initializing IndexedDB Persistence...");
+  const request = indexedDB.open("SonicShareDB", 1);
+
+  request.onupgradeneeded = (e) => {
+    db = e.target.result;
+    if (!db.objectStoreNames.contains("chunks")) {
+      db.createObjectStore("chunks");
+      console.log("📦 Created IndexedDB store: 'chunks'");
+    }
+  };
+
+  request.onsuccess = (e) => {
+    db = e.target.result;
+    console.log("✅ IndexedDB Ready");
+
+    // Recover metadata from localStorage
+    const savedSeq = localStorage.getItem("expectedSeq");
+    if (savedSeq) {
+      expectedSeq = parseInt(savedSeq);
+      console.log("📋 Recovered progress: seq", expectedSeq);
+    }
+    const savedFile = localStorage.getItem("currentFile");
+    if (savedFile) {
+      currentFile = JSON.parse(savedFile);
+      console.log("📋 Recovered file metadata:", currentFile.name);
+    }
+
+    if (cb) cb();
+  };
+
+  request.onerror = (e) => {
+    console.error("❌ IndexedDB Failed:", e);
+    if (cb) cb();
+  };
 }
-function clearDB() {}
+
+// 15.1 — Sequential Message Processing
+let messageQueue = Promise.resolve();
+
+async function saveChunkToDB(seq, data) {
+  if (!db) return;
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(["chunks"], "readwrite");
+    const store = transaction.objectStore("chunks");
+    const request = store.put(data, seq);
+
+    // Persist metadata synchronously after transaction success
+    transaction.oncomplete = () => {
+      localStorage.setItem("expectedSeq", expectedSeq);
+      localStorage.setItem("currentFile", JSON.stringify(currentFile));
+      resolve();
+    };
+    transaction.onerror = () => reject(transaction.error);
+  });
+}
+
+async function getAllChunksFromDB() {
+  return new Promise((resolve, reject) => {
+    if (!db) return resolve([]);
+    const transaction = db.transaction(["chunks"], "readonly");
+    const store = transaction.objectStore("chunks");
+    const request = store.getAll();
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+function clearDB() {
+  console.log("🧹 Clearing persistence state...");
+  localStorage.removeItem("expectedSeq");
+  localStorage.removeItem("currentFile");
+  if (!db) return;
+  const transaction = db.transaction(["chunks"], "readwrite");
+  const store = transaction.objectStore("chunks");
+  store.clear();
+}
 
 // --- Connection ---
 function connect(onConnected) {
+  // 12.6 — Ensure persistence is ready before connection
+  if (!db) {
+    initDB(() => connect(onConnected));
+    return;
+  }
+
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
   const host = window.location.host;
   const wsUrl = `${protocol}//${host}/ws`;
 
   console.log("Connecting to:", wsUrl);
   const statusEl = document.getElementById("status");
-  if (statusEl) statusEl.innerText = "Connecting to server...";
+  if (statusEl) statusEl.innerText = "Connecting to relay...";
 
   ws = new WebSocket(wsUrl);
 
   ws.onopen = () => {
     console.log("Connected");
     isConnected = true;
-    if (statusEl) statusEl.innerText = "Connected to Server. Ready.";
-    generateKeyPair().then(() => {
-      if (onConnected) onConnected();
-    });
+    if (statusEl) statusEl.innerText = "Connected! Ready to start.";
+    if (onConnected) onConnected();
   };
 
   ws.onmessage = (event) => {
-    const msg = JSON.parse(event.data);
+    // 15.2 — Wrap everything in a queue to prevent race conditions
+    messageQueue = messageQueue
+      .then(async () => {
+        const msg = JSON.parse(event.data);
+        const statusEl = document.getElementById("status");
 
-    if (msg.type === "CODE") {
-      state = "WAITING";
-      sessionCode = msg.code;
-      console.log("Code:", sessionCode);
-      if (document.getElementById("invite-code")) {
-        document.getElementById("invite-code").innerText = msg.code;
-      }
-      if (statusEl) statusEl.innerText = "Waiting for receiver...";
-    }
+        if (msg.type === "CODE") {
+          state = "WAITING";
+          sessionCode = msg.code;
+          console.log("Code:", sessionCode);
+          if (document.getElementById("invite-code")) {
+            document.getElementById("invite-code").innerText = msg.code;
+          }
+          if (statusEl) {
+            statusEl.innerText = "Waiting for receiver...";
+            statusEl.style.color = "var(--text-secondary)";
+          }
+        }
 
-    if (msg.type === "READY") {
-      state = "READY";
-      console.log("✅ READY — paired");
-      if (statusEl) statusEl.innerText = "Pairing successful!";
-      if (selectedFile) sendFile(selectedFile);
-    }
+        if (msg.type === "READY") {
+          state = "READY";
+          console.log("✅ READY — paired");
+          if (statusEl) {
+            statusEl.innerText = "Paired! Establishing secure channel...";
+            statusEl.style.color = "var(--accent)";
+          }
 
-    handleMessage(msg);
+          await generateKeys();
+          await sendPublicKey();
+
+          if (expectedSeq > 0) {
+            console.log(
+              "📡 Progress detected. Sending RESUME:",
+              expectedSeq - 1,
+            );
+            ws.send(
+              JSON.stringify({
+                type: "RESUME",
+                code: sessionCode,
+                lastSeq: expectedSeq - 1,
+              }),
+            );
+          }
+
+          if (selectedFile) await sendFile(selectedFile);
+        }
+
+        if (msg.type === "ERROR") {
+          if (statusEl) {
+            statusEl.style.color = "var(--error)";
+            if (msg.msg === "INVALID_CODE") {
+              statusEl.innerText = "❌ Error: Invalid invite code";
+            } else if (msg.msg === "SESSION_FULL") {
+              statusEl.innerText = "❌ Error: Session is full";
+            } else if (msg.msg === "SESSION_EXPIRED") {
+              statusEl.innerText = "❌ Error: Session has expired";
+            } else {
+              statusEl.innerText = "❌ Error: " + msg.msg;
+            }
+          }
+        }
+
+        await handleMessage(msg);
+      })
+      .catch((err) => {
+        console.error("Critical Queue Error:", err);
+      });
   };
 
   ws.onclose = () => {
     isConnected = false;
     state = "IDLE";
     console.log("Disconnected");
-    if (statusEl) statusEl.innerText = "Disconnected. Retrying in 3s...";
+    if (statusEl) {
+      statusEl.innerText = "⚠️ Connection lost. Retrying...";
+      statusEl.style.color = "var(--error)";
+    }
     setTimeout(() => connect(onConnected), 3000);
   };
 
@@ -146,49 +318,95 @@ let currentFile = null;
 let isTransferring = false;
 let isSending = false;
 let transferStartTime = 0;
+let remoteHash = null; // Store for verification
 
 async function handleMessage(msg) {
   const statusEl = document.getElementById("status");
 
   if (msg.type === "START") {
-    currentFile = { name: msg.name, size: msg.size };
-    expectedSeq = 0;
-    receivedChunks = [];
+    // 12.5 — Check if we should resume or reset
+    if (
+      currentFile &&
+      currentFile.name === msg.name &&
+      currentFile.size === msg.size &&
+      expectedSeq > 0
+    ) {
+      console.log("♻️ Resuming transfer for:", msg.name);
+      // Keep existing expectedSeq and chunks
+    } else {
+      console.log("🆕 Starting new transfer for:", msg.name);
+      currentFile = { name: msg.name, size: msg.size };
+      expectedSeq = 0;
+      receivedChunks = [];
+      clearDB();
+    }
+
     isTransferring = true;
     transferStartTime = Date.now();
     const container = document.getElementById("progress-container");
     if (container) container.style.display = "block";
-    if (statusEl) statusEl.innerText = `Receiving: ${msg.name}...`;
-    console.log("Transfer Started:", msg.name);
+    if (statusEl) {
+      statusEl.innerText = `Connected. Receiving: ${msg.name}...`;
+      statusEl.style.color = "var(--accent)";
+    }
   }
 
   if (msg.type === "DATA") {
-    onData(msg);
+    await onData(msg);
   }
 
   if (msg.type === "ACK") {
-    onAck(msg);
+    await onAck(msg);
+  }
+
+  if (msg.type === "RESUME") {
+    await onResume(msg);
+  }
+
+  if (msg.type === "KEY") {
+    console.log("🔑 Peer key received. Deriving shared secret...");
+    const peerKey = await importPeerKey(msg.payload);
+    await deriveSharedKey(peerKey);
+
+    if (statusEl) {
+      statusEl.innerText = "🔐 Secure channel established";
+      statusEl.style.color = "var(--success)";
+    }
+
+    // If we are the sender and have a file waiting, try sending now that key is ready
+    if (selectedFile && state === "READY") await trySend();
+  }
+
+  if (msg.type === "HASH") {
+    console.log("🔒 Integrity Hash received. Decrypting...");
+    const decrypted = await decryptChunk(msg.payload, msg.iv);
+    remoteHash = new TextDecoder().decode(decrypted);
+    console.log("📋 Remote Hash (Decrypted):", remoteHash);
   }
 
   if (msg.type === "END") {
-    saveFile();
+    await saveFile();
   }
 
   if (msg.type === "ERROR") {
     console.error("Server Error");
   }
 }
-
 // 11.2 — Receiver: Send ACKs
-function onData(p) {
+async function onData(p) {
   if (state !== "READY") {
     console.error("❌ Not READY. Blocking DATA process.");
     return;
   }
 
   if (p.seq === expectedSeq) {
-    console.log("Data received, seq:", p.seq);
-    receivedChunks[p.seq] = base64ToArrayBuffer(p.payload);
+    if (!sharedKey) {
+      console.warn("⏳ DATA received but sharedKey not ready. Waiting...");
+      return;
+    }
+
+    const decrypted = await decryptChunk(p.payload, p.iv);
+    receivedChunks[p.seq] = decrypted;
     expectedSeq++;
 
     // ✅ SEND ACK
@@ -200,6 +418,8 @@ function onData(p) {
       }),
     );
 
+    // Save to Persistence (Ensure it's done index by index)
+    await saveChunkToDB(p.seq, decrypted);
     updateReceiverUI(expectedSeq);
   } else {
     console.warn(
@@ -210,9 +430,7 @@ function onData(p) {
     );
   }
 }
-
-// 11.3 & 11.5 — Sender: Track and Clean ACKs
-function onAck(p) {
+async function onAck(p) {
   lastAck = p.seq;
   console.log("ACK received:", lastAck);
 
@@ -222,7 +440,24 @@ function onAck(p) {
     }
   }
 
-  trySend();
+  await trySend();
+}
+
+// 12.3 — Sender: Handle RESUME
+async function onResume(p) {
+  console.log("📩 RESUME received. Peer has up to seq:", p.lastSeq);
+  lastAck = p.lastSeq;
+  nextSeq = lastAck + 1;
+
+  // clear inflight older packets
+  for (let s in inflight) {
+    if (Number(s) <= lastAck) {
+      delete inflight[s];
+    }
+  }
+
+  console.log("🚀 Resuming transfer from seq:", nextSeq);
+  await trySend();
 }
 
 // --- Actions ---
@@ -237,13 +472,16 @@ function joinSession(code) {
   ws.send(JSON.stringify({ action: "JOIN", code: code }));
 }
 
-function sendFile(file) {
+async function sendFile(file) {
   currentFile = file;
   if (state === "READY") {
-    startTransfer();
+    await startTransfer();
   } else {
-    document.getElementById("status").innerText =
-      "File ready. Waiting for pairing...";
+    const statusEl = document.getElementById("status");
+    if (statusEl) {
+      statusEl.innerText = "File ready. Waiting for receiver to connect...";
+      statusEl.style.color = "var(--text-secondary)";
+    }
   }
 }
 
@@ -267,6 +505,8 @@ async function startTransfer() {
   inflight = {};
   isTransferring = true;
   transferStartTime = Date.now();
+  const container = document.getElementById("progress-container");
+  if (container) container.style.display = "block";
 
   trySend();
 }
@@ -283,13 +523,24 @@ async function trySend() {
     const slice = currentFile.slice(offset, offset + CHUNK_SIZE);
     const arrayBuffer = await slice.arrayBuffer();
 
-    console.log("Sending DATA, seq:", nextSeq);
+    console.log("Sending DATA, seq:", nextSeq, " (Encrypting...)");
+
+    // 13.6 — Encrypt
+    if (!sharedKey) {
+      console.error("❌ Cannot send. sharedKey not established.");
+      isSending = false;
+      return;
+    }
+
+    const { data, iv } = await encryptChunk(arrayBuffer);
+
     ws.send(
       JSON.stringify({
         type: "DATA",
         code: sessionCode,
         seq: nextSeq,
-        payload: arrayBufferToBase64(arrayBuffer),
+        iv: iv,
+        payload: data,
       }),
     );
 
@@ -305,8 +556,30 @@ async function trySend() {
   // Check completion
   if (lastAck >= totalChunks - 1 && isTransferring) {
     isTransferring = false;
+
+    // 14.1 — Compute and send HASH
+    const fullBuffer = await currentFile.arrayBuffer();
+    const fileHash = await computeHash(fullBuffer);
+    console.log("✅ File sent. Integrity Hash:", fileHash);
+
+    const encryptedHash = await encryptChunk(
+      new TextEncoder().encode(fileHash),
+    );
+
+    ws.send(
+      JSON.stringify({
+        type: "HASH",
+        code: sessionCode,
+        iv: encryptedHash.iv,
+        payload: encryptedHash.data,
+      }),
+    );
+
     ws.send(JSON.stringify({ type: "END", code: sessionCode }));
-    document.getElementById("status").innerText = "File sent successfully!";
+    if (statusEl) {
+      statusEl.innerText = "✅ File sent successfully!";
+      statusEl.style.color = "var(--success)";
+    }
   }
 }
 
@@ -315,21 +588,83 @@ setInterval(() => {
   if (state !== "READY" || !isTransferring) return;
 
   for (let seq in inflight) {
-    console.log("Retransmitting chunk:", seq);
-    ws.send(
-      JSON.stringify({
-        type: "DATA",
-        code: sessionCode,
-        seq: Number(seq),
-        payload: arrayBufferToBase64(inflight[seq]),
-      }),
-    );
+    console.log("Retransmitting chunk:", seq, " (Encrypted)");
+
+    encryptChunk(inflight[seq]).then((encrypted) => {
+      ws.send(
+        JSON.stringify({
+          type: "DATA",
+          code: sessionCode,
+          seq: Number(seq),
+          iv: encrypted.iv,
+          payload: encrypted.data,
+        }),
+      );
+    });
   }
 }, 3000);
 
-function saveFile() {
-  console.log("Saving file...");
+async function saveFile() {
+  console.log("💾 Finalizing file reconstruction...");
+  const statusEl = document.getElementById("status");
+
+  // Always load from DB to ensure no missing chunks (especially after resume)
+  console.log("📂 Loading all chunks from IndexedDB store...");
+  const dbChunks = await getAllChunksFromDB();
+
+  if (dbChunks && dbChunks.length > 0) {
+    receivedChunks = dbChunks;
+  }
+
+  if (receivedChunks.length === 0) {
+    console.error("❌ No chunks found to reconstruct file!");
+    if (statusEl) statusEl.innerText = "❌ Error: No data received.";
+    return;
+  }
+
   const blob = new Blob(receivedChunks);
+
+  // 14.2 — Integrity Verification (with Memory Safety)
+  const MAX_HASH_SIZE = 250 * 1024 * 1024; // 250MB safety cap
+  if (currentFile && currentFile.size <= MAX_HASH_SIZE) {
+    try {
+      if (statusEl) {
+        statusEl.innerText = "🔒 Verifying integrity...";
+        statusEl.style.color = "var(--accent)";
+      }
+      console.log("🔒 Verifying integrity hash...");
+      const fullBuffer = await blob.arrayBuffer();
+      const localHash = await computeHash(fullBuffer);
+      console.log("📋 Local Hash:", localHash);
+
+      if (remoteHash) {
+        if (localHash === remoteHash) {
+          console.log("✅ INTEGRITY VERIFIED");
+          if (statusEl) {
+            statusEl.innerText = "✅ Verified! Download ready.";
+            statusEl.style.color = "var(--success)";
+          }
+        } else {
+          console.error("❌ INTEGRITY FAILED");
+          if (statusEl) {
+            statusEl.innerText = "❌ Error: Integrity check failed!";
+            statusEl.style.color = "var(--error)";
+          }
+          alert(
+            "Warning: File integrity check failed. The file may be corrupt.",
+          );
+        }
+      }
+    } catch (e) {
+      console.error("Hash verification failed:", e);
+    }
+  } else {
+    console.log(
+      "⏩ File too large for browser memory hashing. Skipping integrity check.",
+    );
+  }
+
+  // Trigger Download
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
   a.download = currentFile ? currentFile.name : "received_file";
@@ -338,27 +673,52 @@ function saveFile() {
   document.body.removeChild(a);
 
   isTransferring = false;
-  document.getElementById("status").innerText = "File received!";
+  if (statusEl) {
+    statusEl.innerText = "✅ Download complete!";
+    statusEl.style.color = "var(--success)";
+  }
   const bar = document.getElementById("progress-bar");
   if (bar) bar.style.width = "100%";
+
+  clearDB();
 }
 
 function updateReceiverUI(expectedSeq) {
-  const totalBytes = expectedSeq * CHUNK_SIZE;
+  const totalBytes = Math.min(expectedSeq * CHUNK_SIZE, currentFile.size);
   const percent = Math.min(
     100,
     Math.round((totalBytes / currentFile.size) * 100),
   );
   const bar = document.getElementById("progress-bar");
   if (bar) bar.style.width = `${percent}%`;
+
+  // Speed calculation
+  const elapsed = (Date.now() - transferStartTime) / 1000;
+  let speed = "0.00";
+  if (elapsed > 0) {
+    speed = (totalBytes / (1024 * 1024) / elapsed).toFixed(2);
+  }
+
   const statusEl = document.getElementById("status");
-  if (statusEl) statusEl.innerText = `Receiving... ${percent}%`;
+  if (statusEl) statusEl.innerText = `Receiving... ${percent}% (${speed} MB/s)`;
 }
 
 function updateSenderUI(offset) {
-  const percent = Math.min(100, Math.round((offset / currentFile.size) * 100));
+  const actualOffset = Math.min(offset, currentFile.size);
+  const percent = Math.min(
+    100,
+    Math.round((actualOffset / currentFile.size) * 100),
+  );
   const bar = document.getElementById("progress-bar");
   if (bar) bar.style.width = `${percent}%`;
+
+  // Speed calculation
+  const elapsed = (Date.now() - transferStartTime) / 1000;
+  let speed = "0.00";
+  if (elapsed > 0) {
+    speed = (actualOffset / (1024 * 1024) / elapsed).toFixed(2);
+  }
+
   const statusEl = document.getElementById("status");
-  if (statusEl) statusEl.innerText = `Sending... ${percent}%`;
+  if (statusEl) statusEl.innerText = `Sending... ${percent}% (${speed} MB/s)`;
 }

@@ -1,4 +1,5 @@
 from fastapi import FastAPI, WebSocket
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from starlette.responses import FileResponse
 from session_manager import SessionManager
@@ -6,11 +7,24 @@ import os
 from pathlib import Path
 
 app = FastAPI()
+
+# ✅ PART A & B: ENABLE CORS & HANDLE WEBSOCKET ORIGIN
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],   # allow all (DEV ONLY)
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 manager = SessionManager()
 
 # WebSocket endpoint
 @app.websocket("/ws")
 async def websocket_endpoint(ws: WebSocket):
+    origin = ws.headers.get("origin")
+    print("WebSocket Origin:", origin)
+
     await ws.accept()
     print("Client connected")
 
@@ -26,6 +40,7 @@ async def websocket_endpoint(ws: WebSocket):
             elif action == "JOIN":
                 await manager.join(ws, data.get("code"))
             else:
+                # Relay everything else (DATA, ACK, RESUME, KEY, HASH, START, etc.)
                 await manager.relay(ws, data)
 
     except Exception as e:
@@ -37,7 +52,6 @@ BASE_DIR = Path(__file__).resolve().parent
 WEB_DIR = BASE_DIR.parent / "web"
 
 print(f"Serving files from: {WEB_DIR}")
-print(f"Files in web dir: {list(WEB_DIR.glob('*'))}")
 
 # Serve static files (CSS, JS, etc) - must come BEFORE the catch-all route
 app.mount("/static", StaticFiles(directory=str(WEB_DIR)), name="static")
