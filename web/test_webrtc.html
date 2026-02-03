@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>WebRTC Test | SonicShare</title>
+    <link rel="stylesheet" href="/static/style.css" />
+    <style>
+      .test-box {
+        margin: 1.5rem 0;
+        padding: 1.5rem;
+        background: rgba(0, 0, 0, 0.3);
+        border-radius: 12px;
+        border: 1px solid var(--glass-border);
+      }
+      .status-good {
+        color: #10b981;
+        font-weight: bold;
+      }
+      .status-bad {
+        color: #ef4444;
+        font-weight: bold;
+      }
+      .code-block {
+        background: #000;
+        padding: 1rem;
+        border-radius: 8px;
+        font-family: monospace;
+        font-size: 0.85rem;
+        overflow-x: auto;
+        margin: 0.5rem 0;
+        color: #10b981;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <div class="card">
+        <h2 style="font-size: 2rem">🌐 WebRTC Verification</h2>
+        <p>Step 15: Internet-Ready P2P Transport</p>
+
+        <div class="test-box">
+          <h3>✅ Implementation Status</h3>
+          <div style="line-height: 1.8">
+            <div>
+              ✅ <strong>Signaling:</strong> WSS handles OFFER/ANSWER/ICE
+            </div>
+            <div>
+              ✅ <strong>Transport:</strong> RTCPeerConnection + DataChannel
+            </div>
+            <div>
+              ✅ <strong>Fallbacks:</strong> Auto-switch to WSS if needed
+            </div>
+            <div>
+              ✅ <strong>Config:</strong> Google STUN servers configured
+            </div>
+            <div>
+              ✅ <strong>Integration:</strong> Seamless with existing E2EE
+            </div>
+          </div>
+        </div>
+
+        <div class="test-box">
+          <h3>🔐 How It Works</h3>
+          <ol style="line-height: 1.8; color: var(--text-secondary)">
+            <li>
+              <strong>Connect:</strong> WebSocket establishes signaling channel
+            </li>
+            <li><strong>Pair:</strong> Session created/joined (READY)</li>
+            <li>
+              <strong>Signal:</strong> Peers exchange SDP Offer/Answer & ICE
+              Candidates
+            </li>
+            <li><strong>Tunnel:</strong> High-speed P2P DataChannel opens</li>
+            <li>
+              <strong>Transfer:</strong> Encrypted chunks flow via WebRTC
+              (UDP/SCTP)
+            </li>
+          </ol>
+        </div>
+
+        <div class="test-box">
+          <h3>🧪 How to Test</h3>
+          <p>Open Sender and Receiver. Watch the console logs.</p>
+          <div style="display: flex; gap: 1rem; margin-top: 1rem">
+            <button
+              class="btn"
+              onclick="window.open('/', '_blank')"
+              style="flex: 1"
+            >
+              Open Sender
+            </button>
+            <button
+              class="btn btn-secondary"
+              onclick="window.open('/receiver.html', '_blank')"
+              style="flex: 1"
+            >
+              Open Receiver
+            </button>
+          </div>
+        </div>
+
+        <div class="test-box">
+          <h3>📋 Logs to Watch</h3>
+
+          <h4 style="margin-top: 1rem; color: var(--accent)">
+            Sender/Receiver Consoles:
+          </h4>
+          <div class="code-block">
+            🚀 Starting WebRTC Setup... 🛠 Creating Data Channel... (Sender
+            only) 📤 Sending WebRTC OFFER... Pm Received WebRTC ANSWER 🌐 WebRTC
+            State: connected ✅ Peer connected over Internet (WebRTC) ✅ WebRTC
+            Data Channel OPEN ⚡ High-speed P2P Tunnel Established
+          </div>
+        </div>
+
+        <a href="index.html" class="back-link">&larr; Back to Home</a>
+      </div>
+    </div>
+  </body>
+</html>

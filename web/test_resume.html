@@ -1,0 +1,315 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Resume Transfer Test | SonicShare</title>
+    <link rel="stylesheet" href="/static/style.css" />
+    <style>
+      .test-panel {
+        margin: 2rem 0;
+        padding: 1.5rem;
+        background: rgba(0, 0, 0, 0.3);
+        border-radius: 16px;
+        border: 1px solid var(--glass-border);
+      }
+      .test-step {
+        margin: 1rem 0;
+        padding: 1rem;
+        background: rgba(255, 255, 255, 0.05);
+        border-radius: 8px;
+        border-left: 3px solid var(--accent);
+      }
+      .test-step h4 {
+        margin: 0 0 0.5rem 0;
+        color: var(--accent);
+      }
+      .test-step p {
+        margin: 0.5rem 0;
+        font-size: 0.9rem;
+        color: var(--text-secondary);
+      }
+      .status-indicator {
+        display: inline-block;
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        margin-right: 8px;
+      }
+      .status-pending {
+        background: #fbbf24;
+      }
+      .status-pass {
+        background: #10b981;
+      }
+      .status-fail {
+        background: #ef4444;
+      }
+
+      .test-controls {
+        display: flex;
+        gap: 1rem;
+        margin-top: 1rem;
+      }
+
+      .test-controls button {
+        flex: 1;
+        padding: 0.75rem;
+        background: var(--accent);
+        color: white;
+        border: none;
+        border-radius: 8px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.3s ease;
+      }
+
+      .test-controls button:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px rgba(139, 92, 246, 0.3);
+      }
+
+      .test-controls button:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+
+      .log-viewer {
+        margin-top: 1rem;
+        padding: 1rem;
+        background: #000;
+        border-radius: 8px;
+        font-family: "Courier New", monospace;
+        font-size: 0.85rem;
+        max-height: 300px;
+        overflow-y: auto;
+        color: #10b981;
+      }
+
+      .log-entry {
+        margin: 2px 0;
+        padding: 2px 4px;
+      }
+
+      .log-resume {
+        color: #fbbf24;
+        font-weight: bold;
+      }
+      .log-error {
+        color: #ef4444;
+      }
+      .log-success {
+        color: #10b981;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <div class="card">
+        <h2 style="font-size: 2rem">🧪 Resume Transfer Test Suite</h2>
+        <p>Step 12: Automated Testing for Resume Functionality</p>
+
+        <div class="test-panel">
+          <h3>📋 Test Checklist</h3>
+
+          <div class="test-step">
+            <h4>
+              <span class="status-indicator status-pending" id="status-1"></span
+              >Test 1: Receiver Tab Crash
+            </h4>
+            <p>
+              <strong>Action:</strong> Close receiver tab at ~50%, then
+              reconnect with same code
+            </p>
+            <p>
+              <strong>Expected:</strong> Transfer resumes from last confirmed
+              chunk
+            </p>
+          </div>
+
+          <div class="test-step">
+            <h4>
+              <span class="status-indicator status-pending" id="status-2"></span
+              >Test 2: Network Drop
+            </h4>
+            <p>
+              <strong>Action:</strong> Use DevTools to go offline at ~30%, then
+              back online
+            </p>
+            <p><strong>Expected:</strong> Auto-reconnect and resume transfer</p>
+          </div>
+
+          <div class="test-step">
+            <h4>
+              <span class="status-indicator status-pending" id="status-3"></span
+              >Test 3: Multiple Resumes
+            </h4>
+            <p>
+              <strong>Action:</strong> Close receiver multiple times during
+              transfer
+            </p>
+            <p>
+              <strong>Expected:</strong> Each resume continues from correct
+              position
+            </p>
+          </div>
+
+          <div class="test-step">
+            <h4>
+              <span class="status-indicator status-pending" id="status-4"></span
+              >Test 4: Small File
+            </h4>
+            <p><strong>Action:</strong> Transfer file < 1MB</p>
+            <p>
+              <strong>Expected:</strong> Completes normally without resume logic
+            </p>
+          </div>
+
+          <div class="test-step">
+            <h4>
+              <span class="status-indicator status-pending" id="status-5"></span
+              >Test 5: Large File Stress
+            </h4>
+            <p>
+              <strong>Action:</strong> Transfer 100MB+ file with multiple
+              interruptions
+            </p>
+            <p>
+              <strong>Expected:</strong> All resumes work, final file integrity
+              verified
+            </p>
+          </div>
+        </div>
+
+        <div class="test-panel">
+          <h3>🔍 Key Indicators to Watch</h3>
+          <div class="log-viewer" id="key-logs">
+            <div class="log-entry">
+              Open browser console (F12) and watch for:
+            </div>
+            <div class="log-entry log-resume">
+              ♻️ RESUME TRANSFER DETECTED ♻️
+            </div>
+            <div class="log-entry log-resume">
+              📡 Sending RESUME packet with lastSeq: X
+            </div>
+            <div class="log-entry log-resume">📩 RESUME PACKET RECEIVED</div>
+            <div class="log-entry log-resume">
+              🚀 Resuming transfer from seq: X+1
+            </div>
+            <div class="log-entry log-success">
+              ✅ Cleared N confirmed chunks from inflight buffer
+            </div>
+            <div class="log-entry">━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━</div>
+          </div>
+        </div>
+
+        <div class="test-panel">
+          <h3>🚀 Quick Test Actions</h3>
+          <div class="test-controls">
+            <button onclick="window.open('/', '_blank')">Open Sender</button>
+            <button onclick="window.open('/receiver.html', '_blank')">
+              Open Receiver
+            </button>
+            <button onclick="checkIndexedDB()">Check IndexedDB</button>
+            <button onclick="clearTestData()">Clear Test Data</button>
+          </div>
+        </div>
+
+        <div class="test-panel">
+          <h3>📊 IndexedDB Status</h3>
+          <div
+            id="db-status"
+            style="
+              font-family: monospace;
+              font-size: 0.9rem;
+              color: var(--text-secondary);
+            "
+          >
+            Click "Check IndexedDB" to view stored chunks...
+          </div>
+        </div>
+
+        <a href="index.html" class="back-link">&larr; Back to Home</a>
+      </div>
+    </div>
+
+    <script>
+      async function checkIndexedDB() {
+        const statusDiv = document.getElementById("db-status");
+        statusDiv.innerHTML = "Checking IndexedDB...";
+
+        try {
+          const request = indexedDB.open("SonicShareDB", 1);
+
+          request.onsuccess = (e) => {
+            const db = e.target.result;
+            const transaction = db.transaction(["chunks"], "readonly");
+            const store = transaction.objectStore("chunks");
+            const getAllRequest = store.getAllKeys();
+
+            getAllRequest.onsuccess = () => {
+              const keys = getAllRequest.result;
+              const expectedSeq = localStorage.getItem("expectedSeq");
+              const currentFile = localStorage.getItem("currentFile");
+
+              let html =
+                '<div style="color: var(--success);">✅ IndexedDB Connected</div>';
+              html += `<div>Chunks stored: ${keys.length}</div>`;
+              html += `<div>Expected sequence: ${expectedSeq || "None"}</div>`;
+
+              if (currentFile) {
+                const file = JSON.parse(currentFile);
+                html += `<div>Current file: ${file.name} (${(file.size / (1024 * 1024)).toFixed(2)} MB)</div>`;
+                if (expectedSeq && file.size) {
+                  const progress = Math.round(
+                    ((expectedSeq * 1024 * 1024) / file.size) * 100,
+                  );
+                  html += `<div>Progress: ${progress}%</div>`;
+                }
+              }
+
+              if (keys.length > 0) {
+                html += `<div style="margin-top: 0.5rem; color: var(--accent);">Chunk sequences: ${keys.slice(0, 10).join(", ")}${keys.length > 10 ? "..." : ""}</div>`;
+              }
+
+              statusDiv.innerHTML = html;
+            };
+          };
+
+          request.onerror = () => {
+            statusDiv.innerHTML =
+              '<div style="color: var(--error);">❌ Failed to open IndexedDB</div>';
+          };
+        } catch (e) {
+          statusDiv.innerHTML = `<div style="color: var(--error);">❌ Error: ${e.message}</div>`;
+        }
+      }
+
+      async function clearTestData() {
+        if (!confirm("Clear all test data (IndexedDB + localStorage)?")) return;
+
+        localStorage.removeItem("expectedSeq");
+        localStorage.removeItem("currentFile");
+
+        const request = indexedDB.open("SonicShareDB", 1);
+        request.onsuccess = (e) => {
+          const db = e.target.result;
+          const transaction = db.transaction(["chunks"], "readwrite");
+          const store = transaction.objectStore("chunks");
+          store.clear();
+
+          transaction.oncomplete = () => {
+            alert("✅ Test data cleared!");
+            checkIndexedDB();
+          };
+        };
+      }
+
+      // Auto-check on load
+      window.addEventListener("load", () => {
+        setTimeout(checkIndexedDB, 500);
+      });
+    </script>
+  </body>
+</html>

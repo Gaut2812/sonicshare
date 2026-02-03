@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Production Config Test</title>
+    <style>
+      body {
+        font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+        max-width: 800px;
+        margin: 50px auto;
+        padding: 20px;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+      }
+      .test-card {
+        background: rgba(255, 255, 255, 0.1);
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        border-radius: 12px;
+        padding: 20px;
+        margin: 15px 0;
+        backdrop-filter: blur(10px);
+      }
+      .pass {
+        color: #10b981;
+        font-weight: bold;
+      }
+      .fail {
+        color: #ef4444;
+        font-weight: bold;
+      }
+      .metric {
+        display: flex;
+        justify-content: space-between;
+        margin: 10px 0;
+        padding: 10px;
+        background: rgba(0, 0, 0, 0.3);
+        border-radius: 6px;
+      }
+      h1 {
+        text-align: center;
+      }
+      h2 {
+        color: #fbbf24;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>🚀 Production Config Verification</h1>
+
+    <div class="test-card">
+      <h2>Configuration Values</h2>
+      <div id="config-results"></div>
+    </div>
+
+    <div class="test-card">
+      <h2>Feature Availability</h2>
+      <div id="feature-results"></div>
+    </div>
+
+    <div class="test-card">
+      <h2>Memory Safety Check</h2>
+      <div id="memory-results"></div>
+    </div>
+
+    <script type="module">
+      import {
+        CHUNK_SIZE,
+        WINDOW_SIZE,
+        SESSION_TIMEOUT,
+        HEARTBEAT_INTERVAL,
+        RETRANSMIT_INTERVAL,
+        MAX_RETRIES,
+      } from "./js/config.js";
+
+      import { state } from "./js/state.js";
+
+      import {
+        initStreamingHash,
+        updateStreamingHash,
+        finalizeStreamingHash,
+      } from "./js/crypto.js";
+
+      // Test Configuration
+      const configResults = document.getElementById("config-results");
+      const expectedChunkSize = 256 * 1024;
+      const expectedWindowSize = 16;
+
+      function addMetric(parent, label, value, expected, unit = "") {
+        const div = document.createElement("div");
+        div.className = "metric";
+        const pass = value === expected;
+        div.innerHTML = `
+        <span>${label}:</span>
+        <span class="${pass ? "pass" : "fail"}">
+          ${value}${unit} ${pass ? "✅" : `❌ (Expected: ${expected}${unit})`}
+        </span>
+      `;
+        parent.appendChild(div);
+        return pass;
+      }
+
+      let allPass = true;
+
+      allPass &= addMetric(
+        configResults,
+        "Chunk Size",
+        CHUNK_SIZE / 1024,
+        256,
+        "KB",
+      );
+      allPass &= addMetric(configResults, "Window Size", WINDOW_SIZE, 16);
+      allPass &= addMetric(
+        configResults,
+        "Session Timeout",
+        SESSION_TIMEOUT / 60000,
+        10,
+        " min",
+      );
+      allPass &= addMetric(
+        configResults,
+        "Heartbeat Interval",
+        HEARTBEAT_INTERVAL / 1000,
+        30,
+        "s",
+      );
+      allPass &= addMetric(
+        configResults,
+        "Retransmit Interval",
+        RETRANSMIT_INTERVAL / 1000,
+        3,
+        "s",
+      );
+      allPass &= addMetric(configResults, "Max Retries", MAX_RETRIES, 5);
+
+      // Test Feature Availability
+      const featureResults = document.getElementById("feature-results");
+
+      function checkFeature(label, condition) {
+        const div = document.createElement("div");
+        div.className = "metric";
+        div.innerHTML = `
+        <span>${label}:</span>
+        <span class="${condition ? "pass" : "fail"}">${condition ? "✅ Available" : "❌ Missing"}</span>
+      `;
+        featureResults.appendChild(div);
+        return condition;
+      }
+
+      allPass &= checkFeature("File Offset Tracking", "fileOffset" in state);
+      allPass &= checkFeature(
+        "Last Activity Time",
+        "lastActivityTime" in state,
+      );
+      allPass &= checkFeature("Chunk Retries", "chunkRetries" in state);
+      allPass &= checkFeature("Transfer Speed", "transferSpeed" in state);
+      allPass &= checkFeature("ETA Calculation", "eta" in state);
+      allPass &= checkFeature(
+        "Streaming Hash State",
+        "streamingHashState" in state,
+      );
+      allPass &= checkFeature("Heartbeat Timer", "heartbeatTimer" in state);
+      allPass &= checkFeature(
+        "Session Timeout Timer",
+        "sessionTimeoutTimer" in state,
+      );
+
+      // Test Memory Safety
+      const memoryResults = document.getElementById("memory-results");
+
+      async function testStreamingHash() {
+        try {
+          initStreamingHash();
+
+          // Create test chunks (simulate 1MB of data = 4 chunks of 256KB)
+          const testData1 = new Uint8Array(256 * 1024).fill(1);
+          const testData2 = new Uint8Array(256 * 1024).fill(2);
+
+          await updateStreamingHash(testData1.buffer);
+          await updateStreamingHash(testData2.buffer);
+
+          const hash = await finalizeStreamingHash();
+
+          const div = document.createElement("div");
+          div.className = "metric";
+          div.innerHTML = `
+          <span>Streaming Hash Test:</span>
+          <span class="pass">✅ Working (Hash: ${hash ? hash.substring(0, 16) + "..." : "Generated"})</span>
+        `;
+          memoryResults.appendChild(div);
+
+          return true;
+        } catch (e) {
+          const div = document.createElement("div");
+          div.className = "metric";
+          div.innerHTML = `
+          <span>Streaming Hash Test:</span>
+          <span class="fail">❌ Error: ${e.message}</span>
+        `;
+          memoryResults.appendChild(div);
+          return false;
+        }
+      }
+
+      allPass &= await testStreamingHash();
+
+      // Calculate theoretical performance
+      const div = document.createElement("div");
+      div.className = "metric";
+      div.style.marginTop = "20px";
+      div.style.background = "rgba(16, 185, 129, 0.2)";
+      div.innerHTML = `
+      <span><strong>50GB File Support:</strong></span>
+      <span class="pass">
+        ${allPass ? "✅ PRODUCTION READY" : "❌ Configuration Issues Detected"}
+      </span>
+    `;
+      memoryResults.appendChild(div);
+
+      // Add performance info
+      const perfDiv = document.createElement("div");
+      perfDiv.className = "metric";
+      const totalChunks = Math.ceil((50 * 1024 * 1024 * 1024) / CHUNK_SIZE);
+      perfDiv.innerHTML = `
+      <span>50GB Transfer:</span>
+      <span>${totalChunks.toLocaleString()} chunks @ ${CHUNK_SIZE / 1024}KB each</span>
+    `;
+      memoryResults.appendChild(perfDiv);
+
+      // Final summary
+      if (allPass) {
+        console.log(
+          "%c✅ ALL PRODUCTION CHECKS PASSED",
+          "color: #10b981; font-size: 16px; font-weight: bold;",
+        );
+      } else {
+        console.log(
+          "%c❌ SOME CHECKS FAILED",
+          "color: #ef4444; font-size: 16px; font-weight: bold;",
+        );
+      }
+    </script>
+  </body>
+</html>

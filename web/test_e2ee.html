@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>E2EE Test | SonicShare</title>
+    <link rel="stylesheet" href="/static/style.css" />
+    <style>
+      .test-box {
+        margin: 1.5rem 0;
+        padding: 1.5rem;
+        background: rgba(0, 0, 0, 0.3);
+        border-radius: 12px;
+        border: 1px solid var(--glass-border);
+      }
+      .status-good {
+        color: #10b981;
+        font-weight: bold;
+      }
+      .status-bad {
+        color: #ef4444;
+        font-weight: bold;
+      }
+      .status-warn {
+        color: #fbbf24;
+        font-weight: bold;
+      }
+      .code-block {
+        background: #000;
+        padding: 1rem;
+        border-radius: 8px;
+        font-family: monospace;
+        font-size: 0.85rem;
+        overflow-x: auto;
+        margin: 0.5rem 0;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <div class="card">
+        <h2 style="font-size: 2rem">🔐 E2EE Verification Test</h2>
+        <p>Step 13: End-to-End Encryption Status Check</p>
+
+        <div class="test-box">
+          <h3>🔍 Security Context</h3>
+          <div id="security-status"></div>
+        </div>
+
+        <div class="test-box">
+          <h3>📋 Test Checklist</h3>
+          <div style="font-size: 0.9rem; line-height: 1.8">
+            <div>✅ <strong>ECDH Key Exchange:</strong> P-256 curve</div>
+            <div>✅ <strong>Symmetric Encryption:</strong> AES-GCM 256-bit</div>
+            <div>✅ <strong>API:</strong> Web Crypto API (native)</div>
+            <div>✅ <strong>Server:</strong> Blind relay (no decryption)</div>
+            <div>✅ <strong>Resume:</strong> Works with encrypted chunks</div>
+          </div>
+        </div>
+
+        <div class="test-box">
+          <h3>🧪 How to Test</h3>
+          <ol style="line-height: 1.8; color: var(--text-secondary)">
+            <li>
+              <strong>HTTPS Mode:</strong> Deploy to HTTPS server or use
+              localhost with SSL
+            </li>
+            <li>
+              <strong>HTTP Mode:</strong> Encryption disabled (shows warning
+              badge)
+            </li>
+            <li><strong>Open DevTools:</strong> F12 → Network tab</li>
+            <li>
+              <strong>Start Transfer:</strong> Send a file between sender and
+              receiver
+            </li>
+            <li>
+              <strong>Inspect Packets:</strong> Look for DATA packets in Network
+              tab
+            </li>
+            <li>
+              <strong>Verify:</strong> Payload should be base64 encrypted blob
+            </li>
+          </ol>
+        </div>
+
+        <div class="test-box">
+          <h3>🔐 What to Look For</h3>
+
+          <h4 style="margin-top: 1rem; color: var(--accent)">
+            Console Logs (Secure Mode):
+          </h4>
+          <div class="code-block">
+            🔐 Generating ECDH (P-256) keys... 📡 Sending Public Key...
+            Processing peer key... 🔐 Secure channel established Secure channel
+            derived
+          </div>
+
+          <h4 style="margin-top: 1rem; color: var(--accent)">
+            Console Logs (Local Mode):
+          </h4>
+          <div class="code-block">
+            ⚠️ INSECURE CONTEXT: Encryption disabled. Local Network Mode active.
+            🔓 Connected (Local Mode) Using Local Mode (No Encryption)
+          </div>
+
+          <h4 style="margin-top: 1rem; color: var(--accent)">
+            Network Tab (DATA Packet):
+          </h4>
+          <div class="code-block">
+            { "type": "DATA", "code": "709490", "seq": 5, "iv":
+            "a8f3d9e2c1b4...", ← Random IV "payload": "xK9mP3vL..." ← Encrypted
+            base64 }
+          </div>
+        </div>
+
+        <div class="test-box">
+          <h3>✅ Success Criteria</h3>
+          <div style="line-height: 1.8; color: var(--text-secondary)">
+            <div>✅ File transfers work in both secure and local modes</div>
+            <div>✅ Server logs show unreadable encrypted payloads</div>
+            <div>✅ Network tab shows encrypted blobs (not plain text)</div>
+            <div>✅ Received file opens correctly (decryption works)</div>
+            <div>✅ Resume still works with encrypted chunks</div>
+            <div>✅ ACK system works with encryption</div>
+          </div>
+        </div>
+
+        <div class="test-box">
+          <h3>🚀 Quick Test Actions</h3>
+          <div style="display: flex; gap: 1rem; margin-top: 1rem">
+            <button
+              class="btn"
+              onclick="window.open('/', '_blank')"
+              style="flex: 1"
+            >
+              Open Sender
+            </button>
+            <button
+              class="btn btn-secondary"
+              onclick="window.open('/receiver.html', '_blank')"
+              style="flex: 1"
+            >
+              Open Receiver
+            </button>
+          </div>
+        </div>
+
+        <a href="index.html" class="back-link">&larr; Back to Home</a>
+      </div>
+    </div>
+
+    <script>
+      const IS_SECURE = window.isSecureContext;
+      const statusDiv = document.getElementById("security-status");
+
+      if (IS_SECURE) {
+        statusDiv.innerHTML = `
+                <div class="status-good">✅ SECURE CONTEXT DETECTED</div>
+                <div style="margin-top: 0.5rem; color: var(--text-secondary);">
+                    End-to-end encryption is <strong>ENABLED</strong>.<br>
+                    All file transfers will be encrypted with AES-GCM 256-bit.
+                </div>
+            `;
+      } else {
+        statusDiv.innerHTML = `
+                <div class="status-warn">⚠️ INSECURE CONTEXT (HTTP)</div>
+                <div style="margin-top: 0.5rem; color: var(--text-secondary);">
+                    Encryption is <strong>DISABLED</strong> (Local Mode).<br>
+                    Files transfer in plain text. Use HTTPS for encryption.
+                </div>
+            `;
+      }
+
+      // Check if Web Crypto API is available
+      if (crypto && crypto.subtle) {
+        const apiStatus = document.createElement("div");
+        apiStatus.style.marginTop = "0.5rem";
+        apiStatus.innerHTML =
+          '<div class="status-good">✅ Web Crypto API Available</div>';
+        statusDiv.appendChild(apiStatus);
+      } else {
+        const apiStatus = document.createElement("div");
+        apiStatus.style.marginTop = "0.5rem";
+        apiStatus.innerHTML =
+          '<div class="status-bad">❌ Web Crypto API Not Available</div>';
+        statusDiv.appendChild(apiStatus);
+      }
+    </script>
+  </body>
+</html>

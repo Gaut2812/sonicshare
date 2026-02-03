@@ -1,5 +1,5 @@
 from fastapi import WebSocket
-from server.session_manager import SessionManager
+from session_manager import SessionManager
 
 class PacketRouter:
     def __init__(self, session_manager: SessionManager):
@@ -9,7 +9,7 @@ class PacketRouter:
         msg_type = message.get("type")
         
         # Allowed packet types for forwarding
-        ALLOWED_TYPES = ["DATA", "ACK", "RESUME", "END", "ERROR", "KEY_EXCHANGE", "KEY", "START", "HASH"]
+        ALLOWED_TYPES = ["DATA", "ACK", "RESUME", "END", "ERROR", "KEY_EXCHANGE", "KEY", "START", "HASH", "OFFER", "ANSWER", "ICE"]
         
         if msg_type in ALLOWED_TYPES:
             session = self.manager.find_session_by_websocket(websocket)

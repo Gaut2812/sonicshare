@@ -63,7 +63,7 @@
       </div>
     </div>
 
-    <script src="/static/app.js"></script>
+    <script src="/static/js/main.js" type="module"></script>
     <script>
       window.onload = () => {
         connect();
@@ -80,7 +80,7 @@
       const dropZone = document.getElementById("drop-zone");
       const statusEl = document.getElementById("status");
 
-      selectedFile = null;
+      let selectedFile = null;
 
       fileInput.addEventListener("change", () => {
         if (fileInput.files.length) {
@@ -106,10 +106,11 @@
 
       function handleFileSelection(file) {
         selectedFile = file;
+        if (window.sonicState) window.sonicState.selectedFile = file;
         statusEl.innerText = "Selected: " + selectedFile.name;
         statusEl.style.color = "var(--accent)";
 
-        if (state === "READY") {
+        if (window.sonicState && window.sonicState.transferState === "READY") {
           sendFile(selectedFile);
         } else {
           statusEl.innerText = "File ready. Waiting for pairing (READY)...";
