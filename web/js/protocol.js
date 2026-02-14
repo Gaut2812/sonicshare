@@ -3,6 +3,7 @@ import { updateSenderUI, updateReceiverUI, debugLog } from "./ui.js";
 import {
   CHUNK_SIZE,
   WINDOW_SIZE,
+  MAX_BUFFER,
   IS_SECURE,
   RETRANSMIT_INTERVAL,
   MAX_RETRIES,
@@ -174,102 +175,12 @@ function updateDynamicWindow() {
   }
 }
 
-/**
- * Handle incoming binary WebRTC packet (high-speed path)
- * @param {ArrayBuffer} data - Binary packet
- */
+// Binary packet handling is now delegated to SonicReceiver.js
 export async function handleBinaryPacket(data) {
-  const packet = parsePacket(data);
-
-  if (packet.type === "VIDEO_DATA") {
-    await onVideoData(packet);
-    return;
-  }
-  if (packet.type === "SACK") {
-    if (state.videoProtocol) state.videoProtocol.handleSack(packet);
-    return;
-  }
-  if (packet.type === "FEC") {
-    // Logic to recover formatted packets (Placeholder)
-    return;
-  }
-
-  if (packet.type === "DATA") {
-    await onData(packet);
-  } else if (packet.type === "ACK") {
-    await onAck(packet);
-  } else if (packet.type === PacketType.END) {
-    console.log("🏁 Received binary END packet");
-    saveFile();
-  }
-}
-
-async function startVideoStream() {
-  const chunker = new VideoChunker(
-    state.currentFile,
-    state.videoProtocol.flowController,
+  // Empty or minimal implementation for backwards compatibility if needed
+  console.log(
+    "Binary packet received on protocol.js (ignored, handled by receiver.js)",
   );
-  const container = document.getElementById("progress-container");
-  if (container) container.style.display = "block";
-
-  // Pacing Loop
-  for await (const chunk of chunker.generateChunks()) {
-    if (!state.isTransferring) break;
-    state.videoScheduler.enqueue(chunk);
-
-    // Update UI (Throttle)
-    if (chunk.seq % 10 === 0) {
-      const pct = Math.round(
-        ((chunk.seq * chunk.data.byteLength) / state.currentFile.size) * 100,
-      );
-      updateSenderUI(pct, "Streaming High-Def Video...");
-    }
-  }
-
-  // Wait for scheduler to finish sending all queued chunks
-  await state.videoScheduler.drain();
-
-  state.isTransferring = false;
-  updateSenderUI(100, "Stream Complete");
-
-  // Send END over both channels for robustness
-  if (state.dataChannel && state.dataChannel.readyState === "open") {
-    import("./packet.js").then(({ buildControlPacket }) => {
-      state.dataChannel.send(buildControlPacket("END"));
-    });
-  }
-  import("./network.js").then((m) =>
-    m.sendData({ type: "END", code: state.sessionCode }),
-  );
-}
-
-async function onVideoData(packet) {
-  // Validate Checksum (Fix 4 - Simple Integrity)
-  let sum = 0;
-  const bytes = new Uint8Array(packet.payload);
-  for (let i = 0; i < Math.min(bytes.length, 100); i++) {
-    sum = (sum + bytes[i]) & 0xffff;
-  }
-
-  if (sum !== packet.checksum) {
-    console.error(
-      `❌ Checksum mismatch for video chunk ${packet.seq}. Expected: ${packet.checksum}, Got: ${sum}`,
-    );
-    // In stable mode we might request retransmit, but for now we log it.
-  }
-
-  // 1. Process Payload
-  handleSimpleVideoReceiver(packet.payload, packet.seq, packet.isLast);
-
-  // 2. Send SACK (Cumulative + Range)
-  // Simplified: ACK the current sequence
-  const sackPkt = buildSackPacket(packet.seq, [
-    { start: packet.seq, end: packet.seq },
-  ]);
-
-  if (state.dataChannel && state.dataChannel.readyState === "open") {
-    state.dataChannel.send(sackPkt);
-  }
 }
 
 /**
@@ -341,30 +252,20 @@ async function startTransfer() {
   const totalChunks = Math.ceil(state.currentFile.size / CHUNK_SIZE);
   console.log("Starting Transfer. Total chunks:", totalChunks);
 
+  // New METADATA format for SonicReceiver
   import("./network.js").then((m) =>
     m.sendData({
-      type: "START",
-      code: state.sessionCode,
-      name: state.currentFile.name,
-      size: state.currentFile.size,
+      type: "METADATA",
+      fileName: state.currentFile.name,
+      fileSize: state.currentFile.size,
+      mimeType: state.currentFile.type,
+      totalChunks: totalChunks,
+      chunkSize: CHUNK_SIZE,
+      encrypted: IS_SECURE,
     }),
   );
 
   state.resetTransfer();
-
-  // ⚡ VIDEO MODE DETECTION (Step 7)
-  if (state.currentFile.type.startsWith("video/")) {
-    console.log("🎥 VIDEO DETECTED - Activating Advanced Streaming Engine");
-    debugLog("🎥 Video Mode (Hybrid Congestion + SACK)", "var(--accent)");
-    state.isVideoStream = true;
-
-    if (state.dataChannel && state.dataChannel.readyState === "open") {
-      state.videoProtocol = new VideoTransferProtocol(state.dataChannel);
-      state.videoScheduler = new PacingScheduler(state.videoProtocol);
-      startVideoStream();
-      return;
-    }
-  }
 
   // Initialize streaming hash for memory-safe large file hashing
   initStreamingHash();
@@ -372,7 +273,7 @@ async function startTransfer() {
   const container = document.getElementById("progress-container");
   if (container) container.style.display = "block";
 
-  trySend();
+  // Wait for START_TRANSFER or RESUME_FROM from receiver
 }
 
 // Export for WebRTC bufferedamountlow callback
@@ -382,47 +283,88 @@ async function trySend() {
   if (!state.currentFile || !state.isTransferring || state.isSending) return;
   state.isSending = true;
 
-  debugLog("🚀 Video Transfer Mode (Simple Stream)", "var(--accent)");
-
   const totalChunks = Math.ceil(state.currentFile.size / CHUNK_SIZE);
+  const dataChannels = state.dataChannels.filter(
+    (dc) => dc && dc.readyState === "open",
+  );
   const dataChannel = state.dataChannel;
 
-  // Strict check for valid channel
-  if (!dataChannel || dataChannel.readyState !== "open") {
-    console.error("❌ DataChannel not ready");
+  if (
+    dataChannels.length === 0 &&
+    (!dataChannel || dataChannel.readyState !== "open")
+  ) {
+    console.error("❌ No DataChannels ready");
     state.isSending = false;
     return;
   }
 
-  // Pure Loop - No ACKs, No Retries, No JSON
-  while (state.nextSeq < totalChunks) {
-    // 1. Strict Backpressure check
-    if (dataChannel.bufferedAmount > MAX_BUFFER) {
-      // Wait for drain
-      await new Promise((resolve) => {
-        dataChannel.onbufferedamountlow = () => {
-          dataChannel.onbufferedamountlow = null; // Clear handler
-          resolve();
-        };
-      });
-      continue; // Re-check loop
-    }
+  const { buildSonicPacket } = await import("./packet.js");
 
-    // 2. Read Chunk
+  while (state.nextSeq < totalChunks) {
+    // Round-robin or least-busy selection
+    const activeChannels = dataChannels.filter(
+      (dc) => dc.bufferedAmount < MAX_BUFFER,
+    );
+    if (activeChannels.length === 0) {
+      // Wait for at least one channel to be low
+      await Promise.race(
+        dataChannels.map((dc) => {
+          return new Promise((resolve) => {
+            dc.onbufferedamountlow = () => {
+              dc.onbufferedamountlow = null;
+              resolve();
+            };
+          });
+        }),
+      );
+      continue;
+    }
+    const currentDC = activeChannels.sort(
+      (a, b) => a.bufferedAmount - b.bufferedAmount,
+    )[0];
+
     const offset = state.nextSeq * CHUNK_SIZE;
     const slice = state.currentFile.slice(offset, offset + CHUNK_SIZE);
-    const chunk = await slice.arrayBuffer();
+    let chunk = await slice.arrayBuffer();
 
-    // 3. Send Directly (No JSON, No Encryption for now)
+    // Encryption
+    let isEncrypted = false;
+    const { IS_SECURE } = await import("./config.js");
+    if (IS_SECURE && state.sharedKey && state.sharedKey !== "INSECURE") {
+      const { encryptChunk } = await import("./crypto.js");
+
+      // Create deterministic 12-byte IV from sequence number
+      const customIv = new Uint8Array(12);
+      const ivView = new DataView(customIv.buffer);
+      ivView.setUint32(8, state.nextSeq, false); // Use last 4 bytes for seq
+
+      const encrypted = await encryptChunk(chunk, customIv);
+      chunk = encrypted.data;
+      isEncrypted = true;
+    }
+
+    const isLast = state.nextSeq === totalChunks - 1;
+    const packet = buildSonicPacket(
+      state.nextSeq,
+      chunk,
+      isLast,
+      offset,
+      isEncrypted,
+    );
+
     try {
-      dataChannel.send(chunk);
+      currentDC.send(packet);
+
+      // Track for retransmission
+      state.inflight[state.nextSeq] = chunk;
+      state.lastSentTime[state.nextSeq] = Date.now();
+
       state.nextSeq++;
 
-      // Update UI periodically
       if (state.nextSeq % 50 === 0) {
         const percent = Math.round((state.nextSeq / totalChunks) * 100);
         updateSenderUI(percent, "Streaming...");
-        await new Promise((r) => setTimeout(r, 0)); // Yield to UI
+        await new Promise((r) => setTimeout(r, 0));
       }
     } catch (e) {
       console.error("Send failed:", e);
@@ -430,14 +372,9 @@ async function trySend() {
     }
   }
 
-  // EOF
   if (state.nextSeq >= totalChunks) {
-    console.log("✅ Video Transfer Complete");
-    // EOF Marker (Empty Buffer)
-    dataChannel.send(new ArrayBuffer(0));
-    state.isTransferring = false;
+    console.log("✅ Transfer Sent (Awaiting Final ACKs)");
     state.isSending = false;
-    updateSenderUI(100, "Done");
   } else {
     state.isSending = false;
   }
@@ -462,314 +399,116 @@ export async function handleMessage(msg) {
   }
 
   if (msg.type === "READY") {
+    if (state.transferState === "READY") return;
     state.transferState = "READY";
-    debugLog(`READY received - Pairing complete`, "var(--accent)");
-    await generateKeys();
-    const pubKey = await getPublicKeyB64();
-    import("./network.js").then((m) =>
-      m.sendData({
-        type: "KEY",
-        code: state.sessionCode,
-        payload: pubKey,
-      }),
-    );
-    debugLog("Public key sent", "var(--accent)");
+    debugLog(`READY received - Initializing handshake`, "var(--accent)");
 
-    // startWebRTC() is already handled by the main.js flow
-
-    if (state.expectedSeq > 0) {
-      console.log("♻️ RESUME");
-      debugLog(`♻️ Resuming from chunk ${state.expectedSeq}`, "var(--accent)");
+    // Only sender needs to generate and send key here
+    if (state.isInitiator) {
+      await generateKeys();
+      const pubKey = await getPublicKeyB64();
       import("./network.js").then((m) =>
         m.sendData({
-          type: "RESUME",
+          type: "KEY",
           code: state.sessionCode,
-          lastSeq: state.expectedSeq - 1,
+          payload: pubKey,
         }),
       );
-    } else {
-      console.log("🆕 Starting fresh");
+      debugLog("Public key sent", "var(--accent)");
     }
-    if (state.selectedFile) await sendFile(state.selectedFile);
   }
 
   if (msg.type === "KEY") {
+    if (state.sharedKey) return; // Idempotent
     try {
       debugLog("Processing peer key...", "var(--accent)");
       const peerKey = await importPeerKey(msg.payload);
       await deriveSharedKey(peerKey);
-      const isActuallySecure = IS_SECURE && peerKey !== "INSECURE";
-      if (statusEl) {
-        statusEl.innerText = isActuallySecure
-          ? "🔐 Secure channel established"
-          : "🔓 Connected (Local Mode)";
-        statusEl.style.color = isActuallySecure ? "var(--success)" : "#ffaa00";
+
+      // If we are sender and connection is ready, send the file metadata
+      if (state.isInitiator && state.selectedFile) {
+        await sendFile(state.selectedFile);
       }
-      debugLog("Pairing complete", "var(--success)");
-      if (state.selectedFile && state.transferState === "READY")
-        await trySend();
     } catch (e) {
       console.error(e);
     }
   }
 
-  if (msg.type === "START") {
-    if (
-      state.currentFile &&
-      state.currentFile.name === msg.name &&
-      state.currentFile.size === msg.size &&
-      state.expectedSeq > 0
-    ) {
-      console.log("♻️ RESUMING EXISTING TRANSFER");
-      debugLog(
-        `♻️ Resume: ${state.expectedSeq} chunks saved`,
-        "var(--success)",
-      );
-      // Tell sender where to resume from
-      import("./network.js").then((m) =>
-        m.sendData({
-          type: "RESUME",
-          code: state.sessionCode,
-          lastSeq: state.expectedSeq - 1,
-        }),
-      );
-    } else {
-      console.log("🆕 STARTING NEW TRANSFER");
-      state.currentFile = { name: msg.name, size: msg.size };
-      state.expectedSeq = 0;
-      state.receivedChunks = [];
-      clearDB();
-    }
+  if (msg.type === "START_TRANSFER") {
     state.isTransferring = true;
-    state.transferStartTime = Date.now();
-    const container = document.getElementById("progress-container");
-    if (container) container.style.display = "block";
-    if (statusEl) {
-      statusEl.innerText = `Connected. Receiving: ${msg.name}...`;
-      statusEl.style.color = "var(--accent)";
-    }
-  }
-
-  if (msg.type === "DATA") await onData(msg);
-  if (msg.type === "ACK") await onAck(msg);
-
-  if (msg.type === "CREDIT") {
-    state.credits += msg.allow;
-    // console.log(`💳 Credit received: +${msg.allow} = ${state.credits}`);
     trySend();
   }
 
-  if (msg.type === "RESUME") await onResume(msg);
-
-  if (msg.type === "HASH") {
-    console.log("🔒 Hash received");
-    const decrypted = await decryptChunk(msg.payload, msg.iv);
-    state.remoteHash = new TextDecoder().decode(decrypted);
+  if (msg.type === "RESUME_FROM") {
+    console.log("♻️ RESUME FROM", msg.byteOffset);
+    state.isTransferring = true;
+    state.nextSeq = Math.floor(msg.byteOffset / CHUNK_SIZE);
+    trySend();
   }
 
-  if (msg.type === "END") await saveFile();
+  if (msg.type === "CHUNK_RECEIVED") {
+    // Clear acknowledged chunk
+    delete state.inflight[msg.seq];
+    delete state.chunkRetries[msg.seq];
+
+    // Check if everything is done
+    const totalChunks = Math.ceil(state.currentFile.size / CHUNK_SIZE);
+    if (
+      msg.seq === totalChunks - 1 ||
+      msg.receivedBytes >= state.currentFile.size
+    ) {
+      updateSenderUI(100, "Transfer Complete!");
+      state.isTransferring = false;
+    }
+  }
+
+  if (msg.type === "CHUNK_BATCH_ACK") {
+    const seqs = msg.sequences || [];
+    for (const seq of seqs) {
+      delete state.inflight[seq];
+      delete state.chunkRetries[seq];
+    }
+
+    // Check if complete
+    const totalChunks = Math.ceil(state.currentFile.size / CHUNK_SIZE);
+    const lastSeq = seqs[seqs.length - 1];
+
+    if (
+      lastSeq === totalChunks - 1 ||
+      msg.receivedBytes >= state.currentFile.size
+    ) {
+      updateSenderUI(100, "Transfer Complete!");
+      state.isTransferring = false;
+    }
+  }
+
+  if (msg.type === "RETRANSMIT_REQUEST") {
+    const seqs = msg.sequences || [];
+    console.log("🔄 Retransmitting requested chunks:", seqs);
+    for (const seq of seqs) {
+      if (state.inflight[seq]) {
+        const offset = seq * CHUNK_SIZE;
+        const { buildSonicPacket } = await import("./packet.js");
+        const isLast =
+          seq === Math.ceil(state.currentFile.size / CHUNK_SIZE) - 1;
+        const packet = buildSonicPacket(
+          seq,
+          state.inflight[seq],
+          isLast,
+          offset,
+          false,
+        );
+        if (state.dataChannel && state.dataChannel.readyState === "open") {
+          state.dataChannel.send(packet);
+        }
+      }
+    }
+  }
 
   if (msg.type === "ERROR") {
     if (statusEl) {
       statusEl.style.color = "var(--error)";
-      statusEl.innerText = `❌ Error: ${msg.msg}`;
+      statusEl.innerText = `❌ Error: ${msg.message || msg.msg}`;
     }
-  }
-}
-
-const reorderBuffer = new Map();
-
-async function onData(p) {
-  if (state.transferState !== "READY") return;
-
-  // 1. Store the incoming chunk (handles out-of-order)
-  if (p.seq >= state.expectedSeq) {
-    if (!reorderBuffer.has(p.seq)) {
-      const decrypted = await decryptChunk(p.payload, p.iv);
-      reorderBuffer.set(p.seq, decrypted);
-    }
-  }
-
-  // 2. Process contiguous chunks starting from expectedSeq
-  while (reorderBuffer.has(state.expectedSeq)) {
-    const data = reorderBuffer.get(state.expectedSeq);
-    const seq = state.expectedSeq;
-
-    await saveChunkToDB(seq, data);
-    reorderBuffer.delete(seq);
-    state.expectedSeq++;
-    state.lastActivityTime = Date.now();
-
-    // 3. Send binary ACK for the latest processed chunk
-    if (!state.isVideoStream) {
-      const useWebRTC =
-        state.dataChannel && state.dataChannel.readyState === "open";
-      if (useWebRTC) {
-        const binaryAck = buildAckPacket(seq);
-        sendBinaryData(binaryAck);
-      } else {
-        sendData({
-          type: "ACK",
-          code: state.sessionCode,
-          seq: seq,
-        });
-      }
-    } else if (state.expectedSeq % 4 === 0) {
-      // ⚡ VIDEO MODE: Credit-based flow control
-      const creditMsg = JSON.stringify({
-        type: "CREDIT",
-        code: state.sessionCode,
-        allow: 4,
-      });
-
-      if (state.dataChannel && state.dataChannel.readyState === "open") {
-        state.dataChannel.send(creditMsg);
-      } else {
-        import("./network.js").then((m) => m.sendData(JSON.parse(creditMsg)));
-      }
-    }
-
-    // 4. Update UI (Throttle)
-    const now = Date.now();
-    if (!state._lastUIUpdate || now - state._lastUIUpdate > 200) {
-      state._lastUIUpdate = now;
-      const totalChunks = Math.ceil(state.currentFile.size / CHUNK_SIZE);
-      const pct = Math.round((state.expectedSeq / totalChunks) * 100);
-      const elapsedTime = (Date.now() - state.transferStartTime) / 1000;
-      const speedMBps =
-        elapsedTime > 0
-          ? (state.expectedSeq * CHUNK_SIZE) / (1024 * 1024 * elapsedTime)
-          : 0;
-      updateReceiverUI(pct, speedMBps.toFixed(2));
-    }
-  }
-}
-
-async function onAck(p) {
-  state.lastAck = p.seq;
-  state.lastActivityTime = Date.now();
-
-  // ⚡ Calculate RTT for this chunk (for dynamic window tuning)
-  if (state.chunkSendTimes[p.seq]) {
-    const rtt = Date.now() - state.chunkSendTimes[p.seq];
-    state.rttSamples.push(rtt);
-    delete state.chunkSendTimes[p.seq]; // Clean up
-
-    // Update dynamic window size based on RTT
-    updateDynamicWindow();
-  }
-
-  // Clear acknowledged chunks and their retry counters
-  for (let s in state.inflight) {
-    if (Number(s) <= state.lastAck) {
-      delete state.inflight[s];
-      delete state.chunkRetries[s]; // Clear retry count on success
-      delete state.chunkSendTimes[s]; // Clear send time tracking
-      delete state.lastSentTime[s]; // Clear last sent time
-    }
-  }
-
-  await trySend();
-}
-
-async function onResume(p) {
-  console.log("📩 RESUME", p.lastSeq);
-  state.lastAck = p.lastSeq;
-  state.nextSeq = state.lastAck + 1;
-  state.fileOffset = state.nextSeq * CHUNK_SIZE;
-  state.lastActivityTime = Date.now();
-
-  // Clear inflight and retry counters for already-sent chunks
-  for (let s in state.inflight) {
-    if (Number(s) <= state.lastAck) {
-      delete state.inflight[s];
-      delete state.chunkRetries[s];
-    }
-  }
-
-  debugLog(
-    `♻️ Resume: continuing from seq ${state.nextSeq} (offset ${(state.fileOffset / (1024 * 1024)).toFixed(2)} MB)`,
-    "var(--success)",
-  );
-  await trySend();
-}
-
-async function saveFile() {
-  if (!state.isTransferring) return;
-  // Simplified logic
-  console.log("💾 Finalizing...");
-
-  let chunks;
-  if (state.isVideoStream) {
-    const sortedEntries = Array.from(receivedVideoChunks.entries()).sort(
-      (a, b) => a[0] - b[0],
-    );
-    // Gap check
-    const totalExpected = Math.ceil(state.currentFile.size / CHUNK_SIZE);
-    if (sortedEntries.length < totalExpected) {
-      console.warn(
-        `[Assemble] Warning: Progress at ${sortedEntries.length}/${totalExpected}. Completing anyway...`,
-      );
-    }
-    chunks = sortedEntries.map((entry) => entry[1]);
-  } else {
-    chunks = await getAllChunksFromDB();
-  }
-
-  // Clear reorder buffer for next time
-  reorderBuffer.clear();
-
-  if (!chunks || chunks.length === 0) {
-    console.warn("No chunks found to save!");
-    return;
-  }
-  const blob = new Blob(chunks);
-
-  // Validate Hash
-  const MAX = 250 * 1024 * 1024;
-  if (state.currentFile.size <= MAX) {
-    const buf = await blob.arrayBuffer();
-    const localHash = await computeHash(buf);
-    console.log("Local Hash:", localHash);
-    if (state.remoteHash) {
-      if (
-        localHash === state.remoteHash ||
-        state.remoteHash === "NO_HASH_LOCAL_MODE"
-      ) {
-        console.log("✅ INTEGRITY VERIFIED");
-      } else {
-        console.error("❌ INTEGRITY FAILED");
-        alert("Integrity Check Failed!");
-      }
-    }
-  }
-
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
-  a.download = state.currentFile ? state.currentFile.name : "file";
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  state.isTransferring = false;
-  clearDB();
-  receivedVideoChunks.clear(); // Clear video memory buffer
-  const statusEl = document.getElementById("status");
-  if (statusEl) statusEl.innerText = "✅ Download complete!";
-  if (statusEl) statusEl.style.color = "var(--success)";
-}
-
-const receivedVideoChunks = new Map(); // Store as Map for out-of-order reassembly
-export function handleSimpleVideoReceiver(data, seq, isLast) {
-  receivedVideoChunks.set(seq, data);
-
-  // Simple UI update
-  if (receivedVideoChunks.size % 50 === 0) {
-    updateReceiverUI(receivedVideoChunks.size, "Receiving High-Def Video...");
-  }
-
-  // [Issue 4 Fix] Auto-assemble if last chunk
-  if (isLast) {
-    console.log("🏁 Last video chunk received via isLast flag");
-    setTimeout(() => saveFile(), 100);
   }
 }

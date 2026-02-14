@@ -7,7 +7,10 @@ export class SonicSignaling {
     this.code = sessionCode;
     this.role = role; // 'sender' or 'receiver'
     this.ws = null;
+    // Use the current page's origin (works for both localhost and network access)
     this.baseUrl = window.location.origin;
+    // WebSocket URL (http -> ws, https -> wss)
+    this.wsUrl = this.baseUrl.replace(/^http/, "ws");
 
     // Callbacks to be hooked by protocol/webrtc modules
     this.onAnswer = null;
@@ -58,8 +61,7 @@ export class SonicSignaling {
   // WebSocket only for ICE candidates and status updates
   async connectWebSocket() {
     return new Promise((resolve, reject) => {
-      const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-      const wsUrl = `${protocol}//${window.location.host}/ws/${this.code}/${this.role}`;
+      const wsUrl = `${this.wsUrl}/ws/${this.code}/${this.role}`;
 
       console.log(
         `[Signaling] Connecting WS for ${this.role} on ${this.code}...`,

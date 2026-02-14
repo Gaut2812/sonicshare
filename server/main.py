@@ -79,6 +79,16 @@ session_manager = SessionManager()
 async def startup():
     asyncio.create_task(session_manager.start_cleanup())
 
+# Health check endpoint
+@app.get("/api/health")
+async def health_check():
+    """Simple health check for connection testing"""
+    return {
+        "status": "ok",
+        "message": "SonicShare server is running",
+        "active_sessions": len(session_manager.sessions)
+    }
+
 # REST API for initial signaling (more reliable than WebSocket for SDP exchange)
 @app.post("/api/session")
 async def create_session(data: dict):
@@ -293,10 +303,19 @@ async def receiver():
     return response
 
 @app.get("/")
+@app.get("/index.html")
 async def index():
     response = FileResponse(WEB_DIR / "index.html")
     response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
     return response
+
+@app.get("/{filename}.html")
+async def serve_generic_html(filename: str):
+    """Serve any other HTML files in the web directory"""
+    file_path = WEB_DIR / f"{filename}.html"
+    if file_path.exists():
+        return FileResponse(file_path)
+    return Response(status_code=404)
 
 if __name__ == "__main__":
     import uvicorn

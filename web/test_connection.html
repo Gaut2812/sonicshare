@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SonicShare Connection Test</title>
+    <style>
+      body {
+        font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+        max-width: 800px;
+        margin: 50px auto;
+        padding: 20px;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+      }
+      .card {
+        background: rgba(255, 255, 255, 0.1);
+        backdrop-filter: blur(10px);
+        border-radius: 15px;
+        padding: 30px;
+        box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.37);
+      }
+      h1 {
+        margin-top: 0;
+        font-size: 2em;
+      }
+      .status {
+        padding: 15px;
+        margin: 10px 0;
+        border-radius: 8px;
+        font-weight: bold;
+      }
+      .success {
+        background: rgba(76, 175, 80, 0.3);
+      }
+      .error {
+        background: rgba(244, 67, 54, 0.3);
+      }
+      .info {
+        background: rgba(33, 150, 243, 0.3);
+      }
+      button {
+        background: white;
+        color: #667eea;
+        border: none;
+        padding: 12px 30px;
+        border-radius: 8px;
+        font-size: 16px;
+        font-weight: bold;
+        cursor: pointer;
+        margin: 10px 5px;
+      }
+      button:hover {
+        transform: scale(1.05);
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+      }
+      .info-box {
+        background: rgba(255, 255, 255, 0.2);
+        padding: 15px;
+        border-radius: 8px;
+        margin: 15px 0;
+      }
+      code {
+        background: rgba(0, 0, 0, 0.3);
+        padding: 2px 6px;
+        border-radius: 4px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <h1>🚀 SonicShare Connection Test</h1>
+
+      <div class="info-box">
+        <strong>Server Address:</strong> <code id="serverUrl"></code><br />
+        <strong>Your Role:</strong> <span id="role">Unknown</span>
+      </div>
+
+      <div id="status"></div>
+
+      <button onclick="testConnection()">Test Server Connection</button>
+      <button onclick="testWebSocket()">Test WebSocket</button>
+      <button onclick="window.location.href = '/sender.html'">
+        Go to Sender
+      </button>
+      <button onclick="window.location.href = '/receiver.html'">
+        Go to Receiver
+      </button>
+
+      <div class="info-box" style="margin-top: 30px">
+        <h3>📋 Instructions for Network Testing:</h3>
+        <ol>
+          <li>
+            <strong>On YOUR laptop:</strong> Open
+            <code>http://localhost:8000</code>
+          </li>
+          <li>
+            <strong>On FRIEND's laptop:</strong> Open
+            <code>http://192.168.1.16:8000</code>
+          </li>
+          <li>Click "Test Server Connection" on both laptops</li>
+          <li>If both show ✅ Success, proceed to sender/receiver pages</li>
+        </ol>
+      </div>
+    </div>
+
+    <script>
+      document.getElementById("serverUrl").textContent = window.location.origin;
+
+      async function testConnection() {
+        const statusDiv = document.getElementById("status");
+        statusDiv.innerHTML =
+          '<div class="status info">🔄 Testing HTTP connection...</div>';
+
+        try {
+          const response = await fetch("/api/health");
+          const data = await response.json();
+
+          if (data.status === "ok") {
+            statusDiv.innerHTML =
+              '<div class="status success">✅ Server connection successful!<br>Server is running and accessible.</div>';
+          } else {
+            statusDiv.innerHTML =
+              '<div class="status error">❌ Server responded but status is not OK</div>';
+          }
+        } catch (error) {
+          statusDiv.innerHTML = `<div class="status error">❌ Connection failed: ${error.message}<br>Make sure the server is running on port 8000.</div>`;
+        }
+      }
+
+      async function testWebSocket() {
+        const statusDiv = document.getElementById("status");
+        statusDiv.innerHTML =
+          '<div class="status info">🔄 Testing WebSocket connection...</div>';
+
+        try {
+          const wsProtocol =
+            window.location.protocol === "https:" ? "wss:" : "ws:";
+          const wsUrl = `${wsProtocol}//${window.location.host}/ws/TEST/test`;
+
+          const ws = new WebSocket(wsUrl);
+
+          ws.onopen = () => {
+            statusDiv.innerHTML =
+              '<div class="status success">✅ WebSocket connection successful!<br>Real-time communication is working.</div>';
+            ws.close();
+          };
+
+          ws.onerror = (error) => {
+            statusDiv.innerHTML = `<div class="status error">❌ WebSocket connection failed<br>This might indicate a firewall issue.</div>`;
+          };
+
+          setTimeout(() => {
+            if (ws.readyState !== WebSocket.OPEN) {
+              ws.close();
+              statusDiv.innerHTML =
+                '<div class="status error">❌ WebSocket timeout<br>Connection took too long.</div>';
+            }
+          }, 5000);
+        } catch (error) {
+          statusDiv.innerHTML = `<div class="status error">❌ WebSocket error: ${error.message}</div>`;
+        }
+      }
+
+      // Auto-detect role
+      if (window.location.pathname.includes("sender")) {
+        document.getElementById("role").textContent = "Sender";
+      } else if (window.location.pathname.includes("receiver")) {
+        document.getElementById("role").textContent = "Receiver";
+      } else {
+        document.getElementById("role").textContent = "Testing";
+      }
+    </script>
+  </body>
+</html>

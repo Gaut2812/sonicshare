@@ -42,40 +42,20 @@ window.joinSession = async function (code) {
   }
 
   console.log(`🛠 [UI] Joining Session: ${code}...`);
-  state.isInitiator = false;
-  state.sessionCode = code;
 
   try {
-    // 1. Initialize Signaling Client
-    console.log("📡 [Signaling] Initializing Hybrid Client...");
-    state.signaling = new SonicSignaling(code, "receiver");
+    const { SonicReceiver } = await import("./receiver.js");
+    const receiver = new SonicReceiver(code);
+    window.currentReceiver = receiver; // For debugging
 
-    // 2. Fetch Offer via REST
-    console.log("📨 [Session] Fetching WebRTC Offer...");
-    const session = await state.signaling.getSession();
-
-    if (session.error) {
-      console.error("❌ [Session] Error:", session.error);
-      alert(`Session Error: ${session.error}`);
-      return;
-    }
-
-    // 3. Setup Security & Handle Offer (Generates Answer)
-    console.log("🔐 [Crypto] Preparing security layer...");
-    await generateKeys();
-
-    console.log("🌐 [WebRTC] Handling remote offer...");
-    const { handleOffer } = await import("./webrtc.js");
-    await handleOffer(session.offer);
-
-    // 4. Connect WebSocket for ICE Trickle
-    console.log("🔌 [Signaling] Connecting WebSocket tunnel...");
-    await state.signaling.connectWebSocket();
-
+    await receiver.init();
     debugLog("✅ Connection request sent", "var(--success)");
+
+    // Handle progress updates if needed (SonicReceiver already updates UI)
   } catch (err) {
     console.error("❌ [Main] Joining failed:", err);
     debugLog(`❌ Error: ${err.message}`, "var(--error)");
+    alert(`Connection failed: ${err.message}`);
   }
 };
 

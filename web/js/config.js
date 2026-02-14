@@ -3,9 +3,11 @@ export const CHUNK_SIZE = 8 * 1024; // 8 KB - Fixed for maximum browser compatib
 export const WINDOW_SIZE = 32; // Compensate for smaller chunks
 
 // WebRTC Performance Tuning (CRITICAL FOR SPEED)
-export const MAX_BUFFER = 1024 * 1024; // 1 MB - Strict Backpressure (Step 4)
-export const BUFFER_LOW_THRESHOLD = 256 * 1024; // 256 KB
-export const PREFETCH_CHUNKS = 4; // Parallel file reading optimization
+export const MAX_BUFFER = 4 * 1024 * 1024; // 4 MB - Increased for parallel streams
+export const BUFFER_LOW_THRESHOLD = 1024 * 1024; // 1 MB
+export const PREFETCH_CHUNKS = 8; // Parallel file reading optimization
+export const PARALLEL_FAST_CHANNELS = 6; // Multistream for bandwidth saturation
+export const SACK_BATCH_SIZE = 50; // Acknowledge chunks in batches to save overhead
 
 // Dynamic Window Tuning (based on RTT)
 export const WINDOW_RTT_THRESHOLDS = {

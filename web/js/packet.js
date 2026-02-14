@@ -262,3 +262,41 @@ export function buildFecPacket(group, payload) {
   new Uint8Array(buffer, 5).set(payloadBytes);
   return buffer;
 }
+export function buildSonicPacket(
+  seq,
+  payload,
+  isLast,
+  offset,
+  isEncrypted = false,
+  checksum = null,
+) {
+  const payloadBytes = new Uint8Array(payload);
+  // Header: Seq(4) + Size(4) + Offset(4) + Flags(1) + Reserved(1) + Checksum(2) = 16 bytes
+  const buffer = new ArrayBuffer(16 + payloadBytes.byteLength);
+  const view = new DataView(buffer);
+
+  view.setUint32(0, seq, false);
+  view.setUint32(4, payloadBytes.byteLength, false);
+  view.setUint32(8, offset, false);
+
+  let flags = 0;
+  if (isLast) flags |= 0x01;
+  if (isEncrypted) flags |= 0x02;
+  view.setUint8(12, flags);
+
+  view.setUint8(13, 0); // Reserved
+
+  // Calculate checksum if not provided
+  if (checksum === null) {
+    let sum = 0;
+    const len = Math.min(payloadBytes.length, 100);
+    for (let i = 0; i < len; i++) {
+      sum = (sum + payloadBytes[i]) & 0xffff;
+    }
+    checksum = sum;
+  }
+  view.setUint16(14, checksum, false);
+
+  new Uint8Array(buffer, 16).set(payloadBytes);
+  return buffer;
+}

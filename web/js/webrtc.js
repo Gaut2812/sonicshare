@@ -1,5 +1,10 @@
 import { state } from "./state.js";
-import { RTC_CONFIG, MAX_BUFFER, BUFFER_LOW_THRESHOLD } from "./config.js";
+import {
+  RTC_CONFIG,
+  MAX_BUFFER,
+  BUFFER_LOW_THRESHOLD,
+  PARALLEL_FAST_CHANNELS,
+} from "./config.js";
 import { debugLog } from "./ui.js";
 
 /**
@@ -79,14 +84,22 @@ export async function startWebRTC() {
     });
     setupControlChannel(state.controlChannel);
 
-    // 2. DATA CHANNEL
-    state.dataChannel = state.pc.createDataChannel("file", {
-      ordered: true,
-      maxRetransmits: 3,
-      priority: "high",
-    });
-    state.dataChannel.binaryType = "arraybuffer";
-    setupDataChannel(state.dataChannel);
+    // 2. PARALLEL DATA CHANNELS (High Speed)
+    state.dataChannels = [];
+    for (let i = 0; i < PARALLEL_FAST_CHANNELS; i++) {
+      const label = `fast-${i}`;
+      const dc = state.pc.createDataChannel(label, {
+        ordered: false, // Prevents Head-of-Line blocking
+        maxRetransmits: 3,
+        priority: "high",
+      });
+      dc.binaryType = "arraybuffer";
+      setupDataChannel(dc);
+      state.dataChannels.push(dc);
+
+      // Keep first one as legacy dataChannel for compatibility
+      if (i === 0) state.dataChannel = dc;
+    }
 
     // ⚡ Initialize Signaling EARLY to catch ICE candidates
     console.log("📡 [Signaling] Pre-initializing Client...");
@@ -219,19 +232,30 @@ function setupDataChannel(channel) {
 }
 
 export function canSendOnWebRTC() {
-  if (!state.dataChannel || state.dataChannel.readyState !== "open") {
-    return false;
-  }
-  return state.dataChannel.bufferedAmount < MAX_BUFFER;
+  const channels =
+    state.dataChannels.length > 0 ? state.dataChannels : [state.dataChannel];
+  // Check if at least one channel has space
+  return channels.some(
+    (dc) => dc && dc.readyState === "open" && dc.bufferedAmount < MAX_BUFFER,
+  );
 }
 
 export function sendBinaryData(data) {
-  if (!canSendOnWebRTC()) return false;
+  const channels = state.dataChannels.filter(
+    (dc) => dc && dc.readyState === "open" && dc.bufferedAmount < MAX_BUFFER,
+  );
+  if (channels.length === 0) return false;
+
+  // Pick least busy channel (primitive load balancing)
+  const bestDC = channels.sort(
+    (a, b) => a.bufferedAmount - b.bufferedAmount,
+  )[0];
+
   try {
-    state.dataChannel.send(data);
+    bestDC.send(data);
     return true;
   } catch (e) {
-    console.error("WebRTC send error:", e);
+    console.error("Binary send failed:", e);
     return false;
   }
 }

@@ -104,7 +104,7 @@ export async function finalizeStreamingHash() {
   return bufToB64(hashBuffer);
 }
 
-export async function encryptChunk(buffer) {
+export async function encryptChunk(buffer, customIv = null) {
   if (!IS_SECURE || state.sharedKey === "INSECURE") {
     return {
       iv: null,
@@ -113,7 +113,7 @@ export async function encryptChunk(buffer) {
       dataB64: bufToB64(buffer),
     };
   }
-  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const iv = customIv || crypto.getRandomValues(new Uint8Array(12));
   const encrypted = await crypto.subtle.encrypt(
     { name: "AES-GCM", iv },
     state.sharedKey,

@@ -1,7 +1,8 @@
 export const state = {
   ws: null,
   pc: null,
-  dataChannel: null, // Reliable Data Channel
+  dataChannel: null, // Legacy / Default Data Channel
+  dataChannels: [], // Parallel Data Channels for Speed
   controlChannel: null, // Unreliable Control Channel
   db: null,
 
