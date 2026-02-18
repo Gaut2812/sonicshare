@@ -53,6 +53,9 @@ class SessionManager:
             'answer': None,
             'sender_ws': None,
             'receiver_ws': None,
+            # ICE candidate buffers - hold candidates until peer connects
+            'sender_ice_buffer': [],   # candidates FROM sender, waiting for receiver WS
+            'receiver_ice_buffer': [], # candidates FROM receiver, waiting for sender WS
             'created_at': datetime.now(),
             'last_activity': datetime.now(),
             'status': 'waiting'  # waiting, connecting, connected, completed
@@ -123,7 +126,8 @@ async def get_session(code: str):
     return {
         "code": code,
         "status": session['status'],
-        "offer": session['offer'] if session['status'] == 'waiting' else None
+        "offer": session['offer'],  # Always return offer so receiver can connect
+        "answer": session.get('answer'),
     }
 
 @app.post("/api/session/{code}/answer")
@@ -154,18 +158,24 @@ async def post_answer(code: str, data: dict):
 
 @app.post("/api/session/{code}/ice")
 async def add_ice_candidate(code: str, data: dict):
-    """Add ICE candidate from either peer"""
+    """Add ICE candidate from either peer. Buffers if target peer not yet connected."""
     session = session_manager.get_session(code)
     if not session:
         return {"error": "Session not found"}
     
     candidate = data.get('candidate')
-    role = data.get('role') # 'sender' or 'receiver'
+    role = data.get('role')  # 'sender' or 'receiver'
     
-    # Forward to other peer
-    target_ws = session['receiver_ws'] if role == 'sender' else session['sender_ws']
+    # Determine target WebSocket and buffer key
+    if role == 'sender':
+        target_ws = session.get('receiver_ws')
+        buffer_key = 'sender_ice_buffer'
+    else:
+        target_ws = session.get('sender_ws')
+        buffer_key = 'receiver_ice_buffer'
     
     if target_ws:
+        # Peer is connected - deliver immediately
         try:
             await target_ws.send_json({
                 'type': 'ice_candidate',
@@ -173,6 +183,10 @@ async def add_ice_candidate(code: str, data: dict):
             })
         except Exception as e:
             print(f"[Error] Failed to forward ICE: {e}")
+    else:
+        # Peer not connected yet - buffer the candidate
+        session[buffer_key].append(candidate)
+        print(f"[ICE] Buffered candidate from {role} for session {code} (buffer size: {len(session[buffer_key])})")
     
     return {"status": "ok"}
 
@@ -199,6 +213,22 @@ async def websocket_endpoint(websocket: WebSocket, code: str, role: str):
     
     print(f"[WebSocket] {role} connected to session {code}")
     
+    # Flush any buffered ICE candidates that arrived before this peer connected
+    # Candidates FROM the other peer are stored in the opposite buffer
+    flush_buffer_key = 'receiver_ice_buffer' if role == 'sender' else 'sender_ice_buffer'
+    buffered = session.get(flush_buffer_key, [])
+    if buffered:
+        print(f"[ICE] Flushing {len(buffered)} buffered candidates to {role} in session {code}")
+        for candidate in buffered:
+            try:
+                await websocket.send_json({
+                    'type': 'ice_candidate',
+                    'candidate': candidate
+                })
+            except Exception as e:
+                print(f"[Error] Failed to flush buffered ICE to {role}: {e}")
+        session[flush_buffer_key] = []  # Clear buffer after flushing
+    
     try:
         while True:
             # Use shorter timeout to prevent Windows asyncio issues
@@ -220,15 +250,20 @@ async def websocket_endpoint(websocket: WebSocket, code: str, role: str):
                 await websocket.send_json({"type": "pong"})
                 
             elif msg_type == 'ice_candidate':
-                # Forward ICE candidate to other peer
+                # Forward ICE candidate to other peer, buffer if not connected
                 other_role = 'receiver_ws' if role == 'sender' else 'sender_ws'
                 other_ws = session.get(other_role)
+                buffer_key = 'sender_ice_buffer' if role == 'sender' else 'receiver_ice_buffer'
                 
                 if other_ws:
                     await other_ws.send_json({
                         'type': 'ice_candidate',
                         'candidate': msg.get('candidate')
                     })
+                else:
+                    # Buffer for when the other peer connects
+                    session[buffer_key].append(msg.get('candidate'))
+                    print(f"[ICE] WS buffered candidate from {role} (buffer: {len(session[buffer_key])})")
                     
             elif msg_type == 'transfer_ready':
                 session['status'] = 'connected'
