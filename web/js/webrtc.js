@@ -90,7 +90,7 @@ export async function startWebRTC() {
       const label = `fast-${i}`;
       const dc = state.pc.createDataChannel(label, {
         ordered: false, // Prevents Head-of-Line blocking
-        maxRetransmits: 3,
+        maxRetransmits: 0, // Reliable but no head-of-line blocking wait
         priority: "high",
       });
       dc.binaryType = "arraybuffer";
@@ -146,8 +146,14 @@ export async function startWebRTC() {
       if (channel.label === "control") {
         state.controlChannel = channel;
         setupControlChannel(channel);
-      } else if (channel.label === "file") {
-        state.dataChannel = channel;
+      } else if (
+        channel.label === "file" ||
+        channel.label.startsWith("fast-")
+      ) {
+        // Multi-channel support for receiver
+        if (!state.dataChannels) state.dataChannels = [];
+        state.dataChannels.push(channel);
+        state.dataChannel = channel; // Backward compatibility
         setupDataChannel(channel);
       }
     };
@@ -187,7 +193,7 @@ function setupDataChannel(channel) {
 
       channel._isStable = true;
       console.log("✅ [File] Channel STABLE");
-      channel.bufferedAmountLowThreshold = 512 * 1024;
+      channel.bufferedAmountLowThreshold = 1024 * 1024; // 1MB threshold
       debugLog("⚡ Connection Ready", "var(--success)");
 
       // [Issue 1 Fix] Notify signaling that we are ready to transfer (triggers READY)

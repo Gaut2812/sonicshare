@@ -354,14 +354,9 @@ async function trySend() {
 
     try {
       currentDC.send(packet);
-
-      // Track for retransmission
-      state.inflight[state.nextSeq] = chunk;
-      state.lastSentTime[state.nextSeq] = Date.now();
-
       state.nextSeq++;
 
-      if (state.nextSeq % 50 === 0) {
+      if (state.nextSeq % 4 === 0) {
         const percent = Math.round((state.nextSeq / totalChunks) * 100);
         updateSenderUI(percent, "Streaming...");
         await new Promise((r) => setTimeout(r, 0));
@@ -446,28 +441,10 @@ export async function handleMessage(msg) {
     trySend();
   }
 
-  if (msg.type === "CHUNK_RECEIVED") {
-    // Clear acknowledged chunk
-    delete state.inflight[msg.seq];
-    delete state.chunkRetries[msg.seq];
-
-    // Check if everything is done
-    const totalChunks = Math.ceil(state.currentFile.size / CHUNK_SIZE);
-    if (
-      msg.seq === totalChunks - 1 ||
-      msg.receivedBytes >= state.currentFile.size
-    ) {
-      updateSenderUI(100, "Transfer Complete!");
-      state.isTransferring = false;
-    }
-  }
+  // Individual ACKs disabled for speed (batch only)
 
   if (msg.type === "CHUNK_BATCH_ACK") {
-    const seqs = msg.sequences || [];
-    for (const seq of seqs) {
-      delete state.inflight[seq];
-      delete state.chunkRetries[seq];
-    }
+    // Only track metadata if still using retransmission logic
 
     // Check if complete
     const totalChunks = Math.ceil(state.currentFile.size / CHUNK_SIZE);
@@ -484,23 +461,18 @@ export async function handleMessage(msg) {
 
   if (msg.type === "RETRANSMIT_REQUEST") {
     const seqs = msg.sequences || [];
-    console.log("🔄 Retransmitting requested chunks:", seqs);
+    console.log("🔄 Retransmitting requested chunks (on-demand read):", seqs);
     for (const seq of seqs) {
-      if (state.inflight[seq]) {
-        const offset = seq * CHUNK_SIZE;
-        const { buildSonicPacket } = await import("./packet.js");
-        const isLast =
-          seq === Math.ceil(state.currentFile.size / CHUNK_SIZE) - 1;
-        const packet = buildSonicPacket(
-          seq,
-          state.inflight[seq],
-          isLast,
-          offset,
-          false,
-        );
-        if (state.dataChannel && state.dataChannel.readyState === "open") {
-          state.dataChannel.send(packet);
-        }
+      const offset = seq * CHUNK_SIZE;
+      const slice = state.currentFile.slice(offset, offset + CHUNK_SIZE);
+      const chunk = await slice.arrayBuffer();
+
+      const { buildSonicPacket } = await import("./packet.js");
+      const isLast = seq === Math.ceil(state.currentFile.size / CHUNK_SIZE) - 1;
+      const packet = buildSonicPacket(seq, chunk, isLast, offset, false);
+
+      if (state.dataChannel && state.dataChannel.readyState === "open") {
+        state.dataChannel.send(packet);
       }
     }
   }

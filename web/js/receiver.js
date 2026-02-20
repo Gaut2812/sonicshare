@@ -411,9 +411,8 @@ export class SonicReceiver {
         `[Receiver] Chunk ${header.seq}: ${data.length} bytes, offset ${header.offset}, last=${isLast}`,
       );
 
-      // Store chunk
+      // Store chunk METADATA only (not the actual data pixels/bytes to save RAM)
       this.chunks.set(header.seq, {
-        data: data,
         offset: header.offset,
         size: data.length,
         receivedAt: Date.now(),
@@ -422,16 +421,10 @@ export class SonicReceiver {
 
       this.receivedBytes += data.length;
 
-      // Save to IndexedDB (async, don't block)
+      // Save to IndexedDB (CRITICAL: This is where the actual data lives)
       this.saveChunk(header.seq, data, header.offset, isLast);
 
-      // Send ACK
-      this.sendControl({
-        type: "CHUNK_RECEIVED",
-        seq: header.seq,
-        offset: header.offset,
-        receivedBytes: this.receivedBytes,
-      });
+      // Batch ACK only (Individual ACK disabled for speed)
 
       // Batch ACK
       this.pendingAcks.push(header.seq);
@@ -519,6 +512,27 @@ export class SonicReceiver {
     }
   }
 
+  async getAllChunksFromDB() {
+    if (!this.db || !this.transferId) return [];
+
+    return new Promise((resolve, reject) => {
+      try {
+        const transaction = this.db.transaction(
+          [this.config.storeName],
+          "readonly",
+        );
+        const store = transaction.objectStore(this.config.storeName);
+        const index = store.index("transferId");
+        const request = index.getAll(this.transferId);
+
+        request.onsuccess = () => resolve(request.result || []);
+        request.onerror = () => reject(request.error);
+      } catch (e) {
+        reject(e);
+      }
+    });
+  }
+
   async checkResume() {
     if (!this.db)
       return { hasResume: false, chunks: new Map(), receivedBytes: 0 };
@@ -595,20 +609,18 @@ export class SonicReceiver {
         return;
       }
 
-      // Verify we have all data
-      const totalSize = sorted.reduce((sum, [_, c]) => sum + c.size, 0);
-      if (totalSize !== this.metadata.fileSize) {
-        console.warn(
-          `[Receiver] Size mismatch: expected ${this.metadata.fileSize}, got ${totalSize}`,
-        );
-      }
+      // Combine chunks efficiently from IndexedDB
+      this.updateStatus("Reading from Local Cache...");
+      const dbChunks = await this.getAllChunksFromDB();
+      const finalSorted = dbChunks.sort((a, b) => a.seq - b.seq);
 
-      // Combine chunks efficiently
+      // Verify and Combine
+      const totalSize = finalSorted.reduce((sum, c) => sum + c.size, 0);
       const result = new Uint8Array(totalSize);
       let offset = 0;
 
-      for (const [seq, chunk] of sorted) {
-        result.set(chunk.data, offset);
+      for (const chunk of finalSorted) {
+        result.set(new Uint8Array(chunk.data), offset);
         offset += chunk.size;
       }
 
