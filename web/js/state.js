@@ -21,6 +21,9 @@ export const state = {
   videoScheduler: null,
   credits: 0, // Flow control credits
   transferStartTime: 0,
+  currentChunkSize: 512 * 1024, // Adaptive chunk size (start 512KB)
+  rttMonitorInterval: null,
+  activeChannelIndex: 0, // For round-robin distribution
 
   // Transfer Protocol
   nextSeq: 0,
@@ -79,6 +82,8 @@ export const state = {
     this.chunkSendTimes = {};
     this.prefetchQueue = [];
     this.dynamicWindowSize = 16;
+    this.currentChunkSize = 512 * 1024;
+    this.activeChannelIndex = 0;
   },
 
   clear() {

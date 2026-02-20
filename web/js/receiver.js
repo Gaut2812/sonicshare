@@ -16,6 +16,9 @@ export class SonicReceiver {
     this.readySent = false;
     this.pendingAcks = [];
     this.ackTimer = null;
+    this.writer = null;
+    this.stream = null;
+    this.transferStartTime = 0;
     // Config
     this.config = {
       chunkTimeout: 30000, // 30s without chunk = fail
@@ -345,11 +348,28 @@ export class SonicReceiver {
         // Fresh start
         this.chunks.clear();
         this.receivedBytes = 0;
+
+        // Initialize StreamSaver
+        this.initStream();
+
         this.sendControl({ type: "START_TRANSFER" });
       }
     });
 
     this.updateStatus(`Receiving: ${this.metadata.fileName}`);
+  }
+
+  initStream() {
+    if (!window.streamSaver) {
+      console.warn("StreamSaver not found, falling back to Blobs (RAM-heavy)");
+      return;
+    }
+    console.log("💾 [Receiver] Initializing StreamSaver...");
+    this.stream = window.streamSaver.createWriteStream(this.metadata.fileName, {
+      size: this.metadata.fileSize,
+    });
+    this.writer = this.stream.getWriter();
+    this.transferStartTime = Date.now();
   }
 
   async handleBinaryChunk(arrayBuffer) {
@@ -421,10 +441,17 @@ export class SonicReceiver {
 
       this.receivedBytes += data.length;
 
-      // Save to IndexedDB (CRITICAL: This is where the actual data lives)
+      // Save to IndexedDB (Backup/Resume)
       this.saveChunk(header.seq, data, header.offset, isLast);
 
-      // Batch ACK only (Individual ACK disabled for speed)
+      // Write to Stream (Live Saving)
+      if (this.writer) {
+        this.writer.write(data).catch((e) => {
+          console.error("Stream write failed:", e);
+        });
+      }
+
+      // Batch ACK only
 
       // Batch ACK
       this.pendingAcks.push(header.seq);
@@ -609,28 +636,26 @@ export class SonicReceiver {
         return;
       }
 
-      // Combine chunks efficiently from IndexedDB
-      this.updateStatus("Reading from Local Cache...");
-      const dbChunks = await this.getAllChunksFromDB();
-      const finalSorted = dbChunks.sort((a, b) => a.seq - b.seq);
-
-      // Verify and Combine
-      const totalSize = finalSorted.reduce((sum, c) => sum + c.size, 0);
-      const result = new Uint8Array(totalSize);
-      let offset = 0;
-
-      for (const chunk of finalSorted) {
-        result.set(new Uint8Array(chunk.data), offset);
-        offset += chunk.size;
+      // If we used StreamSaver, just close the writer
+      if (this.writer) {
+        await this.writer.close();
+        this.writer = null;
+        this.updateStatus("File saved to disk!");
+      } else {
+        // Fallback for Blobs
+        this.updateStatus("Reading from Local Cache...");
+        const dbChunks = await this.getAllChunksFromDB();
+        const finalSorted = dbChunks.sort((a, b) => a.seq - b.seq);
+        const totalSize = finalSorted.reduce((sum, c) => sum + c.size, 0);
+        const result = new Uint8Array(totalSize);
+        let offset = 0;
+        for (const chunk of finalSorted) {
+          result.set(new Uint8Array(chunk.data), offset);
+          offset += chunk.size;
+        }
+        const blob = new Blob([result], { type: this.metadata.mimeType });
+        await this.downloadFile(blob, this.metadata.fileName);
       }
-
-      console.log(`[Receiver] File assembled: ${totalSize} bytes`);
-
-      // Create blob
-      const blob = new Blob([result], { type: this.metadata.mimeType });
-
-      // Trigger download
-      await this.downloadFile(blob, this.metadata.fileName);
 
       // Cleanup
       this.state = "completed";

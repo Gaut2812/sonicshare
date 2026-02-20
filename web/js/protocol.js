@@ -260,7 +260,7 @@ async function startTransfer() {
       fileSize: state.currentFile.size,
       mimeType: state.currentFile.type,
       totalChunks: totalChunks,
-      chunkSize: CHUNK_SIZE,
+      chunkSize: state.currentChunkSize, // Use adaptive size
       encrypted: IS_SECURE,
     }),
   );
@@ -283,10 +283,9 @@ async function trySend() {
   if (!state.currentFile || !state.isTransferring || state.isSending) return;
   state.isSending = true;
 
-  const totalChunks = Math.ceil(state.currentFile.size / CHUNK_SIZE);
-  const dataChannels = state.dataChannels.filter(
-    (dc) => dc && dc.readyState === "open",
-  );
+  const dataChannels = (
+    state.dataChannels.length > 0 ? state.dataChannels : [state.dataChannel]
+  ).filter((dc) => dc && dc.readyState === "open");
   const dataChannel = state.dataChannel;
 
   if (
@@ -300,7 +299,7 @@ async function trySend() {
 
   const { buildSonicPacket } = await import("./packet.js");
 
-  while (state.nextSeq < totalChunks) {
+  while (state.fileOffset < state.currentFile.size) {
     // Round-robin or least-busy selection
     const activeChannels = dataChannels.filter(
       (dc) => dc.bufferedAmount < MAX_BUFFER,
@@ -319,12 +318,28 @@ async function trySend() {
       );
       continue;
     }
-    const currentDC = activeChannels.sort(
-      (a, b) => a.bufferedAmount - b.bufferedAmount,
-    )[0];
 
-    const offset = state.nextSeq * CHUNK_SIZE;
-    const slice = state.currentFile.slice(offset, offset + CHUNK_SIZE);
+    // Pick channel in round-robin fashion
+    state.activeChannelIndex =
+      (state.activeChannelIndex + 1) % dataChannels.length;
+    const currentDC = dataChannels[state.activeChannelIndex];
+
+    // Strict Backpressure: If this specific channel is still too full, wait
+    if (currentDC.bufferedAmount > MAX_BUFFER) {
+      await new Promise((resolve) => {
+        currentDC.onbufferedamountlow = () => {
+          currentDC.onbufferedamountlow = null;
+          resolve();
+        };
+      });
+      continue;
+    }
+
+    const offset = state.fileOffset; // Track real offset as chunks are now variable size
+    const slice = state.currentFile.slice(
+      offset,
+      offset + state.currentChunkSize,
+    );
     let chunk = await slice.arrayBuffer();
 
     // Encryption
@@ -343,7 +358,8 @@ async function trySend() {
       isEncrypted = true;
     }
 
-    const isLast = state.nextSeq === totalChunks - 1;
+    const isLast =
+      state.fileOffset + chunk.byteLength >= state.currentFile.size;
     const packet = buildSonicPacket(
       state.nextSeq,
       chunk,
@@ -355,10 +371,20 @@ async function trySend() {
     try {
       currentDC.send(packet);
       state.nextSeq++;
+      state.fileOffset += chunk.byteLength;
+      state.totalBytesTransferred += chunk.byteLength;
 
       if (state.nextSeq % 4 === 0) {
-        const percent = Math.round((state.nextSeq / totalChunks) * 100);
-        updateSenderUI(percent, "Streaming...");
+        const percent = Math.round(
+          (state.fileOffset / state.currentFile.size) * 100,
+        );
+        const kbps = (
+          state.totalBytesTransferred /
+          ((Date.now() - state.transferStartTime) / 1000) /
+          1024
+        ).toFixed(1);
+        const mbps = (kbps / 1024).toFixed(2);
+        updateSenderUI(percent, mbps);
         await new Promise((r) => setTimeout(r, 0));
       }
     } catch (e) {
@@ -367,7 +393,7 @@ async function trySend() {
     }
   }
 
-  if (state.nextSeq >= totalChunks) {
+  if (state.fileOffset >= state.currentFile.size) {
     console.log("✅ Transfer Sent (Awaiting Final ACKs)");
     state.isSending = false;
   } else {
@@ -444,16 +470,7 @@ export async function handleMessage(msg) {
   // Individual ACKs disabled for speed (batch only)
 
   if (msg.type === "CHUNK_BATCH_ACK") {
-    // Only track metadata if still using retransmission logic
-
-    // Check if complete
-    const totalChunks = Math.ceil(state.currentFile.size / CHUNK_SIZE);
-    const lastSeq = seqs[seqs.length - 1];
-
-    if (
-      lastSeq === totalChunks - 1 ||
-      msg.receivedBytes >= state.currentFile.size
-    ) {
+    if (msg.receivedBytes >= state.currentFile.size) {
       updateSenderUI(100, "Transfer Complete!");
       state.isTransferring = false;
     }

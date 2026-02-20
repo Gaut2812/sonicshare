@@ -4,6 +4,8 @@ import {
   MAX_BUFFER,
   BUFFER_LOW_THRESHOLD,
   PARALLEL_FAST_CHANNELS,
+  RTT_POLL_INTERVAL,
+  RTT_CHUNK_THRESHOLDS,
 } from "./config.js";
 import { debugLog } from "./ui.js";
 
@@ -46,6 +48,14 @@ export async function startWebRTC() {
           }
         });
       });
+
+      // Start RTT Monitoring for Adaptive Chunks
+      startRTTMonitor();
+    } else if (
+      state.pc.iceConnectionState === "disconnected" ||
+      state.pc.iceConnectionState === "failed"
+    ) {
+      stopRTTMonitor();
     }
   };
 
@@ -193,7 +203,7 @@ function setupDataChannel(channel) {
 
       channel._isStable = true;
       console.log("✅ [File] Channel STABLE");
-      channel.bufferedAmountLowThreshold = 1024 * 1024; // 1MB threshold
+      channel.bufferedAmountLowThreshold = BUFFER_LOW_THRESHOLD; // Use value from config (4MB)
       debugLog("⚡ Connection Ready", "var(--success)");
 
       // [Issue 1 Fix] Notify signaling that we are ready to transfer (triggers READY)
@@ -315,4 +325,59 @@ function optimizeSDPForHighThroughput(sdp) {
     optimized += "a=max-message-size:262144\r\n";
   }
   return optimized;
+}
+
+/**
+ * Adaptive Chunk Size Logic
+ */
+export function startRTTMonitor() {
+  if (state.rttMonitorInterval) return;
+  console.log("📊 [WebRTC] Starting RTT Monitor...");
+
+  state.rttMonitorInterval = setInterval(async () => {
+    if (!state.pc) return;
+
+    try {
+      const stats = await state.pc.getStats();
+      stats.forEach((report) => {
+        if (report.type === "candidate-pair" && report.state === "succeeded") {
+          const rtt = report.currentRoundTripTime; // seconds
+          if (rtt !== undefined) {
+            adjustAdaptiveChunkSize(rtt);
+          }
+        }
+      });
+    } catch (e) {
+      console.warn("Failed to get RTC stats:", e);
+    }
+  }, RTT_POLL_INTERVAL);
+}
+
+export function stopRTTMonitor() {
+  if (state.rttMonitorInterval) {
+    clearInterval(state.rttMonitorInterval);
+    state.rttMonitorInterval = null;
+    console.log("📊 [WebRTC] RTT Monitor stopped");
+  }
+}
+
+function adjustAdaptiveChunkSize(rtt) {
+  let newSize = state.currentChunkSize;
+
+  if (rtt < RTT_CHUNK_THRESHOLDS.LAN.maxRTT) {
+    newSize = RTT_CHUNK_THRESHOLDS.LAN.chunkSize;
+  } else if (rtt < RTT_CHUNK_THRESHOLDS.FIBER.maxRTT) {
+    newSize = RTT_CHUNK_THRESHOLDS.FIBER.chunkSize;
+  } else if (rtt < RTT_CHUNK_THRESHOLDS.BROADBAND.maxRTT) {
+    newSize = RTT_CHUNK_THRESHOLDS.BROADBAND.chunkSize;
+  } else {
+    newSize = RTT_CHUNK_THRESHOLDS.SLOW.chunkSize;
+  }
+
+  if (newSize !== state.currentChunkSize) {
+    console.log(
+      `📊 [Adaptive] Network RTT: ${(rtt * 1000).toFixed(1)}ms → Chunk: ${newSize / 1024}KB`,
+    );
+    state.currentChunkSize = newSize;
+  }
 }
