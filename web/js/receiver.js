@@ -269,6 +269,9 @@ export class SonicReceiver {
     console.log("[Receiver] Control:", msg.type);
 
     switch (msg.type) {
+      case "ping":
+        // Keepalive from sender — silently discard, no response needed
+        return;
       case "KEY":
         await this.handleKeyExchange(msg.payload);
         break;

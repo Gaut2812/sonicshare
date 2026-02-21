@@ -2,18 +2,21 @@
 // Production-Grade Configuration — Large File Optimized (10GB+)
 // =============================================================================
 
-// Adaptive Chunk Size (start at 512KB, adjust based on RTT)
-export const CHUNK_SIZE = 512 * 1024; // 512 KB default
-export const CHUNK_SIZE_MIN = 256 * 1024; // 256 KB floor (bad connections)
-export const CHUNK_SIZE_MAX = 1024 * 1024; // 1 MB ceiling (LAN / fiber)
+// Adaptive Chunk Size — conservative for internet stability
+export const CHUNK_SIZE = 256 * 1024; // 256 KB default
+export const CHUNK_SIZE_MIN = 128 * 1024; // 128 KB floor
+export const CHUNK_SIZE_MAX = 512 * 1024; // 512 KB ceiling (NOT 1MB on WAN)
 export const WINDOW_SIZE = 32;
 
-// WebRTC Performance Tuning
-export const MAX_BUFFER = 8 * 1024 * 1024; // 8 MB — high water mark before backpressure kicks in
-export const BUFFER_LOW_THRESHOLD = 4 * 1024 * 1024; // 4 MB — resume sending when below this
-export const PREFETCH_CHUNKS = 8;
-export const PARALLEL_FAST_CHANNELS = 4; // 4 streams — optimal for browser SCTP
+// WebRTC Performance Tuning (Internet-Stable)
+export const MAX_BUFFER = 4 * 1024 * 1024; // 4 MB strict ceiling
+export const BUFFER_LOW_THRESHOLD = 2 * 1024 * 1024; // 2 MB resume threshold
+export const PREFETCH_CHUNKS = 4;
+export const PARALLEL_FAST_CHANNELS = 2; // 2 channels — safer for WAN
 export const SACK_BATCH_SIZE = 50;
+
+// Keepalive to prevent NAT UDP mapping expiry
+export const KEEPALIVE_INTERVAL = 5000; // ping every 5 seconds
 
 // Dynamic Window Tuning (based on RTT)
 export const WINDOW_RTT_THRESHOLDS = {
@@ -24,11 +27,12 @@ export const WINDOW_RTT_THRESHOLDS = {
 };
 
 // RTT-Based Adaptive Chunk Thresholds (in seconds)
+// Conservative ceiling of 512KB — don't go to 1MB on internet
 export const RTT_CHUNK_THRESHOLDS = {
-  LAN: { maxRTT: 0.05, chunkSize: 1024 * 1024 }, // <50ms  → 1 MB
-  FIBER: { maxRTT: 0.1, chunkSize: 768 * 1024 }, // <100ms → 768 KB
-  BROADBAND: { maxRTT: 0.2, chunkSize: 512 * 1024 }, // <200ms → 512 KB
-  SLOW: { maxRTT: Infinity, chunkSize: 256 * 1024 }, // >200ms → 256 KB
+  LAN: { maxRTT: 0.05, chunkSize: 512 * 1024 }, // <50ms  → 512 KB max
+  FIBER: { maxRTT: 0.1, chunkSize: 384 * 1024 }, // <100ms → 384 KB
+  BROADBAND: { maxRTT: 0.2, chunkSize: 256 * 1024 }, // <200ms → 256 KB
+  SLOW: { maxRTT: Infinity, chunkSize: 128 * 1024 }, // >200ms → 128 KB
 };
 
 // RTT Monitoring
@@ -55,6 +59,6 @@ export const SCTP_BUFFER_SIZE = 8 * 1024 * 1024;
 
 // Connection Constants
 export const SESSION_TIMEOUT = 10 * 60 * 1000; // 10 minutes
-export const HEARTBEAT_INTERVAL = 30000; // 30 seconds
+export const HEARTBEAT_INTERVAL = 30000; // 30 seconds (signaling)
 export const RETRANSMIT_INTERVAL = 1000; // 1 second
 export const MAX_RETRIES = 5;

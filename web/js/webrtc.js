@@ -6,6 +6,7 @@ import {
   PARALLEL_FAST_CHANNELS,
   RTT_POLL_INTERVAL,
   RTT_CHUNK_THRESHOLDS,
+  KEEPALIVE_INTERVAL,
 } from "./config.js";
 import { debugLog } from "./ui.js";
 
@@ -51,11 +52,14 @@ export async function startWebRTC() {
 
       // Start RTT Monitoring for Adaptive Chunks
       startRTTMonitor();
+      // Start keepalive pings to prevent NAT timeout
+      startKeepalive();
     } else if (
       state.pc.iceConnectionState === "disconnected" ||
       state.pc.iceConnectionState === "failed"
     ) {
       stopRTTMonitor();
+      stopKeepalive();
     }
   };
 
@@ -87,20 +91,19 @@ export async function startWebRTC() {
   if (state.isInitiator) {
     console.log("🛠 [Initiator] Creating Dual Data Channels...");
 
-    // 1. CONTROL CHANNEL
+    // 1. CONTROL CHANNEL — ordered for reliability
     state.controlChannel = state.pc.createDataChannel("control", {
-      ordered: false,
-      maxRetransmits: 0,
+      ordered: true,
     });
     setupControlChannel(state.controlChannel);
 
-    // 2. PARALLEL DATA CHANNELS (High Speed)
+    // 2. PARALLEL DATA CHANNELS
+    // ordered:true = no SCTP collapse on internet; maxRetransmits removed
     state.dataChannels = [];
     for (let i = 0; i < PARALLEL_FAST_CHANNELS; i++) {
       const label = `fast-${i}`;
       const dc = state.pc.createDataChannel(label, {
-        ordered: false, // Prevents Head-of-Line blocking
-        maxRetransmits: 0, // Reliable but no head-of-line blocking wait
+        ordered: true, // ← KEY CHANGE: reliable for internet stability
         priority: "high",
       });
       dc.binaryType = "arraybuffer";
@@ -379,5 +382,32 @@ function adjustAdaptiveChunkSize(rtt) {
       `📊 [Adaptive] Network RTT: ${(rtt * 1000).toFixed(1)}ms → Chunk: ${newSize / 1024}KB`,
     );
     state.currentChunkSize = newSize;
+  }
+}
+
+/**
+ * Keepalive — prevents NAT from closing UDP port mapping during transfer
+ */
+export function startKeepalive() {
+  if (state._keepaliveInterval) return;
+  console.log("💓 [WebRTC] Keepalive started");
+
+  state._keepaliveInterval = setInterval(() => {
+    const ch = state.controlChannel;
+    if (ch && ch.readyState === "open") {
+      try {
+        ch.send(JSON.stringify({ type: "ping" }));
+      } catch (e) {
+        // Ignore send errors during teardown
+      }
+    }
+  }, KEEPALIVE_INTERVAL);
+}
+
+export function stopKeepalive() {
+  if (state._keepaliveInterval) {
+    clearInterval(state._keepaliveInterval);
+    state._keepaliveInterval = null;
+    console.log("💓 [WebRTC] Keepalive stopped");
   }
 }

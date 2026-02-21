@@ -300,37 +300,41 @@ async function trySend() {
   const { buildSonicPacket } = await import("./packet.js");
 
   while (state.fileOffset < state.currentFile.size) {
-    // Round-robin or least-busy selection
-    const activeChannels = dataChannels.filter(
-      (dc) => dc.bufferedAmount < MAX_BUFFER,
-    );
-    if (activeChannels.length === 0) {
-      // Wait for at least one channel to be low
-      await Promise.race(
-        dataChannels.map((dc) => {
-          return new Promise((resolve) => {
-            dc.onbufferedamountlow = () => {
-              dc.onbufferedamountlow = null;
-              resolve();
-            };
-          });
-        }),
-      );
-      continue;
+    // Find the least-loaded open channel via round-robin
+    // Advance index only once per successful send
+    let attempts = 0;
+    let currentDC = null;
+
+    while (attempts < dataChannels.length) {
+      const idx = (state.activeChannelIndex + attempts) % dataChannels.length;
+      const candidate = dataChannels[idx];
+      if (
+        candidate &&
+        candidate.readyState === "open" &&
+        candidate.bufferedAmount < MAX_BUFFER
+      ) {
+        currentDC = candidate;
+        state.activeChannelIndex = (idx + 1) % dataChannels.length;
+        break;
+      }
+      attempts++;
     }
 
-    // Pick channel in round-robin fashion
-    state.activeChannelIndex =
-      (state.activeChannelIndex + 1) % dataChannels.length;
-    const currentDC = dataChannels[state.activeChannelIndex];
-
-    // Strict Backpressure: If this specific channel is still too full, wait
-    if (currentDC.bufferedAmount > MAX_BUFFER) {
+    // All channels are full: wait for the least-loaded one to drain
+    if (!currentDC) {
       await new Promise((resolve) => {
-        currentDC.onbufferedamountlow = () => {
-          currentDC.onbufferedamountlow = null;
-          resolve();
-        };
+        let resolved = false;
+        dataChannels.forEach((dc) => {
+          if (dc && dc.readyState === "open") {
+            dc.onbufferedamountlow = () => {
+              dc.onbufferedamountlow = null;
+              if (!resolved) {
+                resolved = true;
+                resolve();
+              }
+            };
+          }
+        });
       });
       continue;
     }
