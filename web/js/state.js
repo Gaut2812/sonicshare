@@ -24,6 +24,8 @@ export const state = {
   currentChunkSize: 512 * 1024, // Adaptive chunk size (start 512KB)
   rttMonitorInterval: null,
   activeChannelIndex: 0, // For round-robin distribution
+  _readyNotified: false, // Prevents duplicate notifyTransferReady() from parallel channels
+  _keepaliveInterval: null,
 
   // Transfer Protocol
   nextSeq: 0,
@@ -94,5 +96,6 @@ export const state = {
     this.selectedFile = null;
     this.expectedSeq = 0;
     this.receivedChunks = [];
+    this._readyNotified = false;
   },
 };

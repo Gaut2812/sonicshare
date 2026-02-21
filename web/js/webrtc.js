@@ -206,11 +206,13 @@ function setupDataChannel(channel) {
 
       channel._isStable = true;
       console.log("✅ [File] Channel STABLE");
-      channel.bufferedAmountLowThreshold = BUFFER_LOW_THRESHOLD; // Use value from config (4MB)
+      channel.bufferedAmountLowThreshold = BUFFER_LOW_THRESHOLD;
       debugLog("⚡ Connection Ready", "var(--success)");
 
-      // [Issue 1 Fix] Notify signaling that we are ready to transfer (triggers READY)
-      if (state.signaling) {
+      // Only notify ONCE — the first stable channel triggers the READY handshake
+      // (with 2 channels, both would fire and cause duplicate START_TRANSFER)
+      if (state.signaling && !state._readyNotified) {
+        state._readyNotified = true;
         state.signaling.notifyTransferReady();
       }
     };
@@ -320,12 +322,16 @@ function optimizeSDPForHighThroughput(sdp) {
     );
   }
   if (optimized.includes("a=max-message-size")) {
+    // Set to 1MB — well above any chunk+header+AES-GCM tag combination.
+    // Previous value of 262144 (256KB) caused RTCErrorEvent because
+    // a 256KB data chunk + 16-byte header + 16-byte AES tag = 262176 bytes,
+    // which exceeds the negotiated limit and instantly kills the DataChannel.
     optimized = optimized.replace(
       /a=max-message-size:\d+/g,
-      "a=max-message-size:262144",
+      "a=max-message-size:1048576",
     );
   } else {
-    optimized += "a=max-message-size:262144\r\n";
+    optimized += "a=max-message-size:1048576\r\n";
   }
   return optimized;
 }
