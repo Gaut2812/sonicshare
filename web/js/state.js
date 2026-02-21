@@ -21,7 +21,7 @@ export const state = {
   videoScheduler: null,
   credits: 0, // Flow control credits
   transferStartTime: 0,
-  currentChunkSize: 512 * 1024, // Adaptive chunk size (start 512KB)
+  currentChunkSize: 256 * 1024, // Adaptive chunk size — start at 256KB (safe for internet)
   rttMonitorInterval: null,
   activeChannelIndex: 0, // For round-robin distribution
   _readyNotified: false, // Prevents duplicate notifyTransferReady() from parallel channels
@@ -84,7 +84,7 @@ export const state = {
     this.chunkSendTimes = {};
     this.prefetchQueue = [];
     this.dynamicWindowSize = 16;
-    this.currentChunkSize = 512 * 1024;
+    this.currentChunkSize = 256 * 1024; // Reset to safe 256KB default
     this.activeChannelIndex = 0;
   },
 
