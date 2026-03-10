@@ -5,7 +5,7 @@
 // Adaptive Chunk Size — conservative for internet stability
 export const CHUNK_SIZE = 262144; // 256 KB (Sonic Protocol Spec)
 export const CHUNK_SIZE_MIN = 128 * 1024; // 128 KB floor
-export const CHUNK_SIZE_MAX = 512 * 1024; // 512 KB ceiling
+export const CHUNK_SIZE_MAX = 262144; // 256 KB ceiling (SCTP Stability)
 export const WINDOW_SIZE = 32;
 
 // WebRTC Performance Tuning (Internet-Stable)
@@ -29,8 +29,8 @@ export const WINDOW_RTT_THRESHOLDS = {
 // RTT-Based Adaptive Chunk Thresholds (in seconds)
 // Conservative ceiling of 512KB — don't go to 1MB on internet
 export const RTT_CHUNK_THRESHOLDS = {
-  LAN: { maxRTT: 0.05, chunkSize: 512 * 1024 }, // <50ms  → 512 KB max
-  FIBER: { maxRTT: 0.1, chunkSize: 384 * 1024 }, // <100ms → 384 KB
+  LAN: { maxRTT: 0.05, chunkSize: 262144 }, // <50ms  → 256 KB max
+  FIBER: { maxRTT: 0.1, chunkSize: 262144 }, // <100ms → 256 KB
   BROADBAND: { maxRTT: 0.2, chunkSize: 256 * 1024 }, // <200ms → 256 KB
   SLOW: { maxRTT: Infinity, chunkSize: 128 * 1024 }, // >200ms → 128 KB
 };

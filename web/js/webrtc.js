@@ -383,9 +383,12 @@ function adjustAdaptiveChunkSize(rtt) {
     newSize = RTT_CHUNK_THRESHOLDS.SLOW.chunkSize;
   }
 
+  // Cap chunk size at 256KB for SCTP stability (Sonic Protocol Spec)
+  newSize = Math.min(newSize, 256 * 1024);
+
   if (newSize !== state.currentChunkSize) {
     console.log(
-      `📊 [Adaptive] Network RTT: ${(rtt * 1000).toFixed(1)}ms → Chunk: ${newSize / 1024}KB`,
+      `📊 [Adaptive] Network RTT: ${(rtt * 1000).toFixed(1)}ms → Chunk: ${newSize / 1024}KB (Capped at 256KB)`,
     );
     state.currentChunkSize = newSize;
   }

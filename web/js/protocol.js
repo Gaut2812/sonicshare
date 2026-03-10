@@ -297,7 +297,7 @@ async function trySend() {
 
   const { buildSonicPacket } = await import("./packet.js");
 
-  while (state.fileOffset < state.currentFile.size) {
+  while (state.fileOffset < state.currentFile.size && state.isTransferring) {
     // Find the least-loaded open channel via round-robin
     // Advance index only once per successful send
     let attempts = 0;
@@ -371,7 +371,16 @@ async function trySend() {
     );
 
     try {
+      if (currentDC.readyState !== "open") break;
+      if (currentDC.bufferedAmount > MAX_BUFFER) {
+        await new Promise((r) => setTimeout(r, 10));
+        continue;
+      }
+
       currentDC.send(packet);
+      // Give browser event loop time to breathe
+      await new Promise((r) => setTimeout(r, 0));
+
       state.nextSeq++;
       state.fileOffset += chunk.byteLength;
       state.totalBytesTransferred += chunk.byteLength;
