@@ -46,6 +46,55 @@ import {
   PacingScheduler,
 } from "./video_engine.js";
 
+// =============================================================================
+// BBR-Style Pacer (Bottleneck Bandwidth and RTT Pacing)
+// =============================================================================
+class BBRS_Pacer {
+  constructor() {
+    this.lastSentTime = performance.now();
+  }
+
+  // Calculate sleep time to maintain pacingRate
+  async pace(chunkSize) {
+    const now = performance.now();
+    const duration = (chunkSize / state.pacingRate) * 1000;
+    const nextSendTime = this.lastSentTime + duration;
+    const sleep = Math.max(0, nextSendTime - now);
+    
+    if (sleep > 0) {
+      await new Promise(r => setTimeout(r, sleep));
+      this.lastSentTime = performance.now();
+    } else {
+      this.lastSentTime = now;
+    }
+  }
+
+  // Update bandwidth estimation from ACK
+  updateBW(deliveredBytes, ackTime, rtt) {
+    if (rtt < state.minRTT) state.minRTT = rtt;
+
+    const deltaBytes = deliveredBytes - state.deliveredBytes;
+    const deltaTime = (ackTime - state.lastAckTime) / 1000;
+
+    if (deltaTime > 0) {
+      const currentBW = deltaBytes / deltaTime;
+      state.bwWindow.push(currentBW);
+      if (state.bwWindow.length > 10) state.bwWindow.shift();
+
+      const maxBW = state.bwWindow.length > 0 ? Math.max(...state.bwWindow) : state.pacingRate / state.pacingGain;
+      state.pacingRate = maxBW * state.pacingGain;
+      
+      // Clamp pacing rate to sane values: 1MB/s minimum, 100MB/s maximum
+      state.pacingRate = Math.max(1024 * 1024, Math.min(state.pacingRate, 100 * 1024 * 1024));
+    }
+
+    state.deliveredBytes = deliveredBytes;
+    state.lastAckTime = ackTime;
+  }
+}
+
+const pacer = new BBRS_Pacer();
+
 // 🔄 SMART RETRANSMISSION: Selective Retransmit with Exponential Backoff
 setInterval(async () => {
   if (state.transferState !== "READY" || !state.isTransferring) return;
@@ -377,9 +426,11 @@ async function trySend() {
         continue;
       }
 
+      state.chunkSendTimes[state.nextSeq] = performance.now();
       currentDC.send(packet);
+      
       // Give browser event loop time to breathe
-      await new Promise((r) => setTimeout(r, 0));
+      await pacer.pace(chunk.byteLength);
 
       state.nextSeq++;
       state.fileOffset += chunk.byteLength;
@@ -488,6 +539,19 @@ export async function handleMessage(msg) {
   // Individual ACKs disabled for speed (batch only)
 
   if (msg.type === "chunk_ack") {
+    // Update BBR Pacer with delivery feedback
+    const ackedChunks = msg.last_received_chunk + 1;
+    const totalDelivered = ackedChunks * CHUNK_SIZE;
+    const now = performance.now();
+    
+    // Estimate RTT if we have send times
+    let rtt = 100; // default
+    if (state.chunkSendTimes[msg.last_received_chunk]) {
+      rtt = now - state.chunkSendTimes[msg.last_received_chunk];
+    }
+    
+    pacer.updateBW(totalDelivered, now, rtt);
+
     if (msg.last_received_chunk >= Math.ceil(state.currentFile.size / CHUNK_SIZE) - 1) {
       updateSenderUI(100, "Transfer Complete!");
       state.isTransferring = false;

@@ -57,6 +57,14 @@ export const state = {
   prefetchQueue: [], // Prefetched file chunks for parallel reading
   dynamicWindowSize: 16, // Adjusted based on RTT
 
+  // BBR-style Pacing
+  pacingRate: 2 * 1024 * 1024, // Start at 2MB/s
+  deliveredBytes: 0,
+  lastAckTime: performance.now(),
+  minRTT: Infinity,
+  bwWindow: [], // Window of delivery rate samples
+  pacingGain: 1.25, // BBR-like probe gain
+  
   // Crypto
   keyPair: null,
   sharedKey: null,
@@ -86,6 +94,11 @@ export const state = {
     this.dynamicWindowSize = 16;
     this.currentChunkSize = 256 * 1024; // Reset to safe 256KB default
     this.activeChannelIndex = 0;
+    this.pacingRate = 2 * 1024 * 1024;
+    this.deliveredBytes = 0;
+    this.lastAckTime = performance.now();
+    this.minRTT = Infinity;
+    this.bwWindow = [];
   },
 
   clear() {
