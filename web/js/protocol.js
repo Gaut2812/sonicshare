@@ -252,16 +252,14 @@ async function startTransfer() {
   const totalChunks = Math.ceil(state.currentFile.size / CHUNK_SIZE);
   console.log("Starting Transfer. Total chunks:", totalChunks);
 
-  // New METADATA format for SonicReceiver
+  // New METADATA format for Sonic Protocol Spec
   import("./network.js").then((m) =>
     m.sendData({
-      type: "METADATA",
-      fileName: state.currentFile.name,
-      fileSize: state.currentFile.size,
-      mimeType: state.currentFile.type,
-      totalChunks: totalChunks,
-      chunkSize: state.currentChunkSize, // Use adaptive size
-      encrypted: IS_SECURE,
+      type: "file_info",
+      file_name: state.currentFile.name,
+      file_size: state.currentFile.size,
+      total_chunks: totalChunks,
+      chunk_size: state.currentChunkSize,
     }),
   );
 
@@ -320,7 +318,7 @@ async function trySend() {
       attempts++;
     }
 
-    // All channels are full: wait for the least-loaded one to drain
+    // All channels are full or buffer limit reached (Sonic Protocol Spec: 4MB)
     if (!currentDC) {
       await new Promise((resolve) => {
         let resolved = false;
@@ -382,13 +380,20 @@ async function trySend() {
         const percent = Math.round(
           (state.fileOffset / state.currentFile.size) * 100,
         );
-        const kbps = (
-          state.totalBytesTransferred /
-          ((Date.now() - state.transferStartTime) / 1000) /
-          1024
-        ).toFixed(1);
+        const now = Date.now();
+        const duration = (now - state.transferStartTime) / 1000;
+        const kbps = (state.totalBytesTransferred / duration / 1024).toFixed(1);
         const mbps = (kbps / 1024).toFixed(2);
-        updateSenderUI(percent, mbps);
+        
+        // Calculate ETA
+        const remainingBytes = state.currentFile.size - state.fileOffset;
+        const speedBps = state.totalBytesTransferred / duration;
+        const etaSeconds = speedBps > 0 ? Math.round(remainingBytes / speedBps) : 0;
+        const etaStr = etaSeconds > 60 
+          ? `${Math.floor(etaSeconds / 60)}m ${etaSeconds % 60}s` 
+          : `${etaSeconds}s`;
+
+        updateSenderUI(percent, `${mbps} MB/s | ETA: ${etaStr}`);
         await new Promise((r) => setTimeout(r, 0));
       }
     } catch (e) {
@@ -473,8 +478,8 @@ export async function handleMessage(msg) {
 
   // Individual ACKs disabled for speed (batch only)
 
-  if (msg.type === "CHUNK_BATCH_ACK") {
-    if (msg.receivedBytes >= state.currentFile.size) {
+  if (msg.type === "chunk_ack") {
+    if (msg.last_received_chunk >= Math.ceil(state.currentFile.size / CHUNK_SIZE) - 1) {
       updateSenderUI(100, "Transfer Complete!");
       state.isTransferring = false;
     }

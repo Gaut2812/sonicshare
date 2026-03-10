@@ -45,7 +45,7 @@ class SessionManager:
             del self.sessions[code]
 
     def generate_code(self):
-        return str(random.randint(100000, 999999))
+        return "".join([str(random.randint(0, 9)) for _ in range(6)])
 
     async def create(self, ws):
         self.start_cleanup_task()

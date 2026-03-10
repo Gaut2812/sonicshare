@@ -38,11 +38,11 @@ class SessionManager:
         now = datetime.now()
         stale = []
         for code, session in self.sessions.items():
-            if now - session.get('last_activity', now) > timedelta(minutes=10):
+            if now - session.get('last_activity', now) > timedelta(seconds=300):
                 stale.append(code)
         for code in stale:
             del self.sessions[code]
-            print(f"[Cleanup] Removed stale session: {code}")
+            print(f"[Cleanup] Removed stale session (300s expiry): {code}")
     
     def create_session(self, code: str, offer: dict) -> dict:
         self.sessions[code] = {

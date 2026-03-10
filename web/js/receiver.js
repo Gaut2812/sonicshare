@@ -279,10 +279,10 @@ export class SonicReceiver {
         // This is a READY feedback from sender confirming they received our READY
         console.log("[Receiver] Sender is READY");
         break;
-      case "METADATA":
+      case "file_info":
         this.handleMetadata(msg);
         break;
-      case "CHUNK_ACK":
+      case "chunk_ack":
         // Sender confirming they got our ACK (ignore or log)
         break;
       case "TRANSFER_COMPLETE":
@@ -317,12 +317,10 @@ export class SonicReceiver {
 
   handleMetadata(msg) {
     this.metadata = {
-      fileName: msg.fileName,
-      fileSize: msg.fileSize,
-      mimeType: msg.mimeType,
-      totalChunks: msg.totalChunks,
-      chunkSize: msg.chunkSize,
-      encrypted: msg.encrypted || false,
+      fileName: msg.file_name,
+      fileSize: msg.file_size,
+      totalChunks: msg.total_chunks,
+      chunkSize: msg.chunk_size,
       timestamp: Date.now(),
     };
 
@@ -477,10 +475,14 @@ export class SonicReceiver {
   sendBatchAck() {
     if (this.pendingAcks.length === 0) return;
     this.updateProgress();
+
+    // Protocol Spec: acknowledgement every 20 chunks
+    // Send only the LAST received chunk index in the batch
+    const lastChunk = Math.max(...this.pendingAcks);
+
     this.sendControl({
-      type: "CHUNK_BATCH_ACK",
-      sequences: this.pendingAcks,
-      receivedBytes: this.receivedBytes,
+      type: "chunk_ack",
+      last_received_chunk: lastChunk,
     });
     this.pendingAcks = [];
     if (this.ackTimer) {
@@ -732,7 +734,18 @@ export class SonicReceiver {
     const mb = (this.receivedBytes / 1024 / 1024).toFixed(2);
     const totalMb = (this.metadata.fileSize / 1024 / 1024).toFixed(2);
 
-    console.log(`[Progress] ${pct.toFixed(1)}% (${mb}/${totalMb} MB)`);
+    const now = Date.now();
+    const duration = (now - this.transferStartTime) / 1000;
+    const speedBps = duration > 0 ? this.receivedBytes / duration : 0;
+    const mbps = (speedBps / 1024 / 1024).toFixed(2);
+    
+    const remainingBytes = this.metadata.fileSize - this.receivedBytes;
+    const etaSeconds = speedBps > 0 ? Math.round(remainingBytes / speedBps) : 0;
+    const etaStr = etaSeconds > 60 
+      ? `${Math.floor(etaSeconds / 60)}m ${etaSeconds % 60}s` 
+      : `${etaSeconds}s`;
+
+    console.log(`[Progress] ${pct.toFixed(1)}% (${mb}/${totalMb} MB) @ ${mbps} MB/s`);
 
     // Update UI
     const progressBar = document.getElementById("progress-bar");
@@ -742,7 +755,7 @@ export class SonicReceiver {
       progressBar.style.width = `${pct}%`;
     }
     if (progressText) {
-      progressText.textContent = `${pct.toFixed(1)}% - ${mb} / ${totalMb} MB`;
+      progressText.textContent = `${pct.toFixed(1)}% - ${mb} / ${totalMb} MB (${mbps} MB/s) | ETA: ${etaStr}`;
     }
   }
 

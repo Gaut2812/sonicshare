@@ -97,13 +97,13 @@ export async function startWebRTC() {
     });
     setupControlChannel(state.controlChannel);
 
-    // 2. PARALLEL DATA CHANNELS
-    // ordered:true = no SCTP collapse on internet; maxRetransmits removed
+    // 2. PARALLEL DATA CHANNELS (Sonic Protocol Spec)
     state.dataChannels = [];
-    for (let i = 0; i < PARALLEL_FAST_CHANNELS; i++) {
-      const label = `fast-${i}`;
+    for (let i = 1; i <= PARALLEL_FAST_CHANNELS; i++) {
+      const label = `file_channel_${i}`;
       const dc = state.pc.createDataChannel(label, {
-        ordered: true, // ← KEY CHANGE: reliable for internet stability
+        ordered: false, // Unreliable (protocol handles retransmits)
+        maxRetransmits: 0,
         priority: "high",
       });
       dc.binaryType = "arraybuffer";
@@ -111,7 +111,7 @@ export async function startWebRTC() {
       state.dataChannels.push(dc);
 
       // Keep first one as legacy dataChannel for compatibility
-      if (i === 0) state.dataChannel = dc;
+      if (i === 1) state.dataChannel = dc;
     }
 
     // ⚡ Initialize Signaling EARLY to catch ICE candidates
@@ -161,7 +161,7 @@ export async function startWebRTC() {
         setupControlChannel(channel);
       } else if (
         channel.label === "file" ||
-        channel.label.startsWith("fast-")
+        channel.label.startsWith("file_channel_")
       ) {
         // Multi-channel support for receiver
         if (!state.dataChannels) state.dataChannels = [];

@@ -3,17 +3,17 @@
 // =============================================================================
 
 // Adaptive Chunk Size — conservative for internet stability
-export const CHUNK_SIZE = 256 * 1024; // 256 KB default
+export const CHUNK_SIZE = 262144; // 256 KB (Sonic Protocol Spec)
 export const CHUNK_SIZE_MIN = 128 * 1024; // 128 KB floor
-export const CHUNK_SIZE_MAX = 512 * 1024; // 512 KB ceiling (NOT 1MB on WAN)
+export const CHUNK_SIZE_MAX = 512 * 1024; // 512 KB ceiling
 export const WINDOW_SIZE = 32;
 
 // WebRTC Performance Tuning (Internet-Stable)
-export const MAX_BUFFER = 4 * 1024 * 1024; // 4 MB strict ceiling
-export const BUFFER_LOW_THRESHOLD = 2 * 1024 * 1024; // 2 MB resume threshold
+export const MAX_BUFFER = 4194304; // 4 MB strict ceiling (Sonic Protocol Spec)
+export const BUFFER_LOW_THRESHOLD = 2097152; // 2 MB resume threshold
 export const PREFETCH_CHUNKS = 4;
-export const PARALLEL_FAST_CHANNELS = 2; // 2 channels — safer for WAN
-export const SACK_BATCH_SIZE = 50;
+export const PARALLEL_FAST_CHANNELS = 4; // 4 channels (Sonic Protocol Spec)
+export const SACK_BATCH_SIZE = 20; // ACK every 20 chunks (Sonic Protocol Spec)
 
 // Keepalive to prevent NAT UDP mapping expiry
 export const KEEPALIVE_INTERVAL = 5000; // ping every 5 seconds
@@ -42,11 +42,9 @@ export const RTT_POLL_INTERVAL = 2000; // Check RTT every 2 seconds
 export const RTC_CONFIG = {
   iceServers: [
     { urls: "stun:stun.l.google.com:19302" },
-    { urls: "stun:stun1.l.google.com:19302" },
-    { urls: "stun:stun2.l.google.com:19302" },
-    { urls: "stun:stun3.l.google.com:19302" },
-    { urls: "stun:stun4.l.google.com:19302" },
+    { urls: "stun:stun.cloudflare.com:3478" },
   ],
+  turnFallback: true, // Sonic Protocol Spec
 };
 
 export const IS_SECURE = window.isSecureContext;
@@ -58,7 +56,8 @@ export const FEC_RATIO = 0.1;
 export const SCTP_BUFFER_SIZE = 8 * 1024 * 1024;
 
 // Connection Constants
-export const SESSION_TIMEOUT = 10 * 60 * 1000; // 10 minutes
+// Connection Constants
+export const SESSION_TIMEOUT = 300 * 1000; // 300 seconds (Sonic Protocol Spec)
 export const HEARTBEAT_INTERVAL = 30000; // 30 seconds (signaling)
 export const RETRANSMIT_INTERVAL = 1000; // 1 second
 export const MAX_RETRIES = 5;
