@@ -23,6 +23,16 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Custom middleware to disable caching for static files (development)
+@app.middleware("http")
+async def add_no_cache_header(request, call_next):
+    response = await call_next(request)
+    if request.url.path.startswith("/static"):
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+    return response
+
 # Session storage with automatic cleanup
 class SessionManager:
     def __init__(self):
