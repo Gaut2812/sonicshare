@@ -104,11 +104,28 @@
         }
       });
 
-      function handleFileSelection(file) {
-        selectedFile = file;
-        if (window.sonicState) window.sonicState.selectedFile = file;
-        statusEl.innerText = "Selected: " + selectedFile.name;
+      async function handleFileSelection(file) {
+        let fileToSend = file;
+
+        statusEl.innerText = "Selected: " + file.name;
         statusEl.style.color = "var(--accent)";
+
+        if (file.type && file.type.startsWith("video/")) {
+          try {
+            const { maybeCompressVideo } = await import(
+              "/static/js/video_compression.js"
+            );
+            fileToSend = await maybeCompressVideo(file, (message, color) => {
+              statusEl.innerText = message;
+              statusEl.style.color = color || "var(--accent)";
+            });
+          } catch (e) {
+            console.warn("[Sender] Video compression module unavailable:", e);
+          }
+        }
+
+        selectedFile = fileToSend;
+        if (window.sonicState) window.sonicState.selectedFile = fileToSend;
 
         if (window.sonicState && window.sonicState.transferState === "READY") {
           sendFile(selectedFile);
